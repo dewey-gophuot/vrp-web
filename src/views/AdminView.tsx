@@ -1,31 +1,92 @@
 import React, { useEffect, useState } from 'react';
-import { Shield, Users, Truck, Key, Search, Plus, Edit2, Trash2, Mail, CheckCircle2, MapPin, X } from 'lucide-react';
+import { Shield, Users, Truck, Key, Search, Plus, Edit2, Trash2, Mail, CheckCircle2, MapPin, X, Eye, Zap } from 'lucide-react';
 import api from '../api';
+
+// ─── Shared helpers ──────────────────────────────────────────────────────────
+
+function inputCls(extra = '') {
+  return `mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 border border-outline-variant/10 text-on-surface ${extra}`;
+}
+function labelCls() { return 'text-xs font-bold text-on-surface-variant uppercase tracking-wide'; }
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div><label className={labelCls()}>{label}</label>{children}</div>;
+}
+
+function ModalWrap({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-outline/20 backdrop-blur-sm p-4">
+      <div className="bg-surface-container-lowest w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh]">
+        <div className="flex justify-between items-center p-6 border-b border-outline-variant/10 shrink-0">
+          <h3 className="text-xl font-bold text-on-surface font-headline">{title}</h3>
+          <button onClick={onClose} className="text-outline hover:text-on-surface transition-colors p-1 rounded-lg hover:bg-surface-container"><X size={20} /></button>
+        </div>
+        <div className="p-6 overflow-y-auto">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDelete({ name, onConfirm, onCancel, isDeleting }: { name: string; onConfirm: () => void; onCancel: () => void; isDeleting: boolean }) {
+  return (
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-outline/20 backdrop-blur-sm p-4">
+      <div className="bg-surface-container-lowest w-full max-w-sm rounded-2xl shadow-2xl p-8 text-center animate-in fade-in zoom-in-95 duration-200">
+        <div className="w-14 h-14 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4"><Trash2 size={26} className="text-error" /></div>
+        <h3 className="text-lg font-bold text-on-surface mb-2">Delete "{name}"?</h3>
+        <p className="text-sm text-on-surface-variant mb-6">This action cannot be undone.</p>
+        <div className="flex gap-3">
+          <button onClick={onCancel} className="flex-1 h-10 rounded-xl bg-surface-container hover:bg-surface-container-high font-bold text-sm text-on-surface transition-colors">Cancel</button>
+          <button onClick={onConfirm} disabled={isDeleting} className="flex-1 h-10 rounded-xl bg-error text-white font-bold text-sm disabled:opacity-60 transition-colors hover:bg-error/90">
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabButton({ active, onClick, icon: Icon, label }: any) {
+  return (
+    <button onClick={onClick} className={`flex items-center gap-2 px-6 py-4 font-bold text-sm border-b-2 transition-all ${active ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low/50 rounded-t-xl'}`}>
+      <Icon size={18} />{label}
+    </button>
+  );
+}
+
+// ─── Main View ────────────────────────────────────────────────────────────────
+
+type ModalType = { type: 'create-user' | 'edit-user' | 'create-vehicle' | 'edit-vehicle' | 'create-depot' | 'edit-depot'; data?: any } | null;
+type DeleteState = { entity: 'user' | 'vehicle' | 'depot'; id: string; name: string } | null;
 
 export default function AdminView() {
   const [activeTab, setActiveTab] = useState('users');
-  const [showModal, setShowModal] = useState<string | null>(null);
+  const [modal, setModal] = useState<ModalType>(null);
+  const [deleteState, setDeleteState] = useState<DeleteState>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [fleetData, setFleetData] = useState<any[]>([]);
   const [usersData, setUsersData] = useState<any[]>([]);
   const [depotsData, setDepotsData] = useState<any[]>([]);
 
-  const loadFleet = () => {
-    api.getFleetVehicles().then(setFleetData).catch(console.error);
+  const loadFleet = () => api.getFleetVehicles().then(setFleetData).catch(console.error);
+  const loadUsers = () => api.listUsers().then(setUsersData).catch(console.error);
+  const loadDepots = () => api.listDepots().then(setDepotsData).catch(console.error);
+
+  useEffect(() => { loadFleet(); loadUsers(); loadDepots(); }, []);
+
+  const handleDelete = async () => {
+    if (!deleteState) return;
+    setIsDeleting(true);
+    try {
+      if (deleteState.entity === 'vehicle') { await api.deleteFleetVehicle(deleteState.id); loadFleet(); }
+      if (deleteState.entity === 'user') { await api.deleteUser(deleteState.id); loadUsers(); }
+      if (deleteState.entity === 'depot') { await api.deleteDepot(deleteState.id); loadDepots(); }
+      setDeleteState(null);
+    } catch (e) { console.error(e); window.alert('Xóa thất bại.'); }
+    finally { setIsDeleting(false); }
   };
 
-  const loadUsers = () => {
-    api.listUsers().then(setUsersData).catch(console.error);
-  };
-
-  const loadDepots = () => {
-    api.listDepots().then(setDepotsData).catch(console.error);
-  };
-
-  useEffect(() => {
-    loadFleet();
-    loadUsers();
-    loadDepots();
-  }, []);
+  const addLabel = activeTab === 'users' ? 'Add User/Driver' : activeTab === 'fleet' ? 'Add Vehicle' : activeTab === 'depots' ? 'Add Depot' : 'Add Key';
+  const addModal: ModalType = activeTab === 'users' ? { type: 'create-user' } : activeTab === 'fleet' ? { type: 'create-vehicle' } : activeTab === 'depots' ? { type: 'create-depot' } : null;
 
   return (
     <div className="flex-1 overflow-y-auto p-8 lg:p-12 bg-background flex flex-col h-full relative">
@@ -34,13 +95,11 @@ export default function AdminView() {
           <h2 className="text-on-surface font-headline text-3xl font-extrabold tracking-tight">Admin Center</h2>
           <p className="text-on-surface-variant mt-2 text-sm">Manage users, access roles, fleet records, depots, and integrations.</p>
         </div>
-        <button
-          onClick={() => setShowModal(activeTab)}
-          className="primary-gradient text-on-primary px-6 py-2.5 rounded-xl font-bold text-sm shadow-md hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2"
-        >
-          <Plus size={18} />
-          {activeTab === 'users' ? 'Add User/Driver' : activeTab === 'fleet' ? 'Add Vehicle' : activeTab === 'depots' ? 'Add Depot' : 'Add Key'}
-        </button>
+        {activeTab !== 'api' && (
+          <button onClick={() => setModal(addModal)} className="primary-gradient text-on-primary px-6 py-2.5 rounded-xl font-bold text-sm shadow-md hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2">
+            <Plus size={18} />{addLabel}
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-2 mb-8 border-b border-outline-variant/20 shrink-0">
@@ -57,297 +116,293 @@ export default function AdminView() {
             <input type="text" placeholder={`Search ${activeTab}...`} className="pl-10 pr-4 py-2 bg-surface-container-low border border-outline-variant/10 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 w-64 outline-none text-on-surface placeholder:text-outline" />
           </div>
         </div>
-
         <div className="flex-1 overflow-auto">
-          {activeTab === 'users' && <UsersTable usersData={usersData} />}
-          {activeTab === 'fleet' && <FleetTable fleetData={fleetData} />}
-          {activeTab === 'depots' && <DepotsTable depotsData={depotsData} />}
+          {activeTab === 'users' && (
+            <UsersTable
+              usersData={usersData}
+              onEdit={(u) => setModal({ type: 'edit-user', data: u })}
+              onDelete={(u) => setDeleteState({ entity: 'user', id: u.id, name: u.full_name || u.email })}
+            />
+          )}
+          {activeTab === 'fleet' && (
+            <FleetTable
+              fleetData={fleetData}
+              onEdit={(v) => setModal({ type: 'edit-vehicle', data: v })}
+              onDelete={(v) => setDeleteState({ entity: 'vehicle', id: v.id, name: v.name })}
+            />
+          )}
+          {activeTab === 'depots' && (
+            <DepotsTable
+              depotsData={depotsData}
+              onEdit={(d) => setModal({ type: 'edit-depot', data: d })}
+              onDelete={(d) => setDeleteState({ entity: 'depot', id: d.id, name: d.name })}
+            />
+          )}
           {activeTab === 'api' && <ApiKeysList />}
         </div>
       </div>
 
-      {showModal && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-outline/20 backdrop-blur-sm p-4">
-          <div className="bg-surface-container-lowest w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-6 border-b border-outline-variant/10">
-              <h3 className="text-xl font-bold text-on-surface font-headline">
-                {showModal === 'users' ? 'Add User/Driver' : showModal === 'fleet' ? 'Add Vehicle' : showModal === 'depots' ? 'Add Depot' : 'Add Item'}
-              </h3>
-              <button onClick={() => setShowModal(null)} className="text-outline hover:text-on-surface transition-colors p-1 rounded-lg hover:bg-surface-container">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-6">
-              {showModal === 'users' && <UserForm onClose={() => setShowModal(null)} onCreated={loadUsers} />}
-              {showModal === 'fleet' && <FleetForm onClose={() => setShowModal(null)} onCreated={loadFleet} />}
-              {showModal === 'depots' && <DepotForm onClose={() => setShowModal(null)} onCreated={loadDepots} />}
-            </div>
-          </div>
-        </div>
+      {/* Modals */}
+      {modal?.type === 'create-user' && <ModalWrap title="Add User / Driver" onClose={() => setModal(null)}><UserForm onClose={() => setModal(null)} onCreated={loadUsers} /></ModalWrap>}
+      {modal?.type === 'edit-user' && <ModalWrap title="Edit User" onClose={() => setModal(null)}><UserForm initial={modal.data} onClose={() => setModal(null)} onCreated={loadUsers} /></ModalWrap>}
+      {modal?.type === 'create-vehicle' && <ModalWrap title="Add Vehicle" onClose={() => setModal(null)}><FleetForm onClose={() => setModal(null)} onCreated={loadFleet} /></ModalWrap>}
+      {modal?.type === 'edit-vehicle' && <ModalWrap title="Edit Vehicle" onClose={() => setModal(null)}><FleetForm initial={modal.data} onClose={() => setModal(null)} onCreated={loadFleet} /></ModalWrap>}
+      {modal?.type === 'create-depot' && <ModalWrap title="Add Depot" onClose={() => setModal(null)}><DepotForm onClose={() => setModal(null)} onCreated={loadDepots} /></ModalWrap>}
+      {modal?.type === 'edit-depot' && <ModalWrap title="Edit Depot" onClose={() => setModal(null)}><DepotForm initial={modal.data} onClose={() => setModal(null)} onCreated={loadDepots} /></ModalWrap>}
+
+      {/* Delete confirmation */}
+      {deleteState && (
+        <ConfirmDelete
+          name={deleteState.name}
+          isDeleting={isDeleting}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteState(null)}
+        />
       )}
     </div>
   );
 }
 
-function TabButton({ active, onClick, icon: Icon, label }: any) {
-  return (
-    <button onClick={onClick} className={`flex items-center gap-2 px-6 py-4 font-bold text-sm border-b-2 transition-all ${active ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low/50 rounded-t-xl'}`}>
-      <Icon size={18} />{label}
-    </button>
-  );
-}
+// ─── User Form (Create + Edit) ────────────────────────────────────────────────
 
-function UserForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [formData, setFormData] = useState({
-    full_name: '',
-    email: '',
-    role: 'Driver',
-    phone: '',
+function UserForm({ initial, onClose, onCreated }: { initial?: any; onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState({
+    full_name: initial?.full_name || '',
+    email: initial?.email || '',
+    role: initial?.role || 'Driver',
+    phone: initial?.phone || '',
   });
-  const [isSaving, setIsSaving] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const isEdit = !!initial;
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
     try {
-      setIsSaving(true);
-      await api.createUser(formData);
+      if (isEdit) {
+        await api.updateUser(initial.id, form);
+      } else {
+        await api.createUser(form);
+      }
       onCreated();
-      window.alert('Tao user thanh cong.');
       onClose();
-    } catch (error) {
-      console.error(error);
-      window.alert('Khong the tao user.');
-    } finally {
-      setIsSaving(false);
-    }
+    } catch (err) { console.error(err); window.alert(isEdit ? 'Cập nhật thất bại.' : 'Tạo user thất bại.'); }
+    finally { setSaving(false); }
   };
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-      <div><label className="text-xs font-bold text-on-surface-variant uppercase">Full Name</label><input type="text" required value={formData.full_name} onChange={e => setFormData(prev => ({ ...prev, full_name: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-      <div><label className="text-xs font-bold text-on-surface-variant uppercase">Email</label><input type="email" required value={formData.email} onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-      <div>
-        <label className="text-xs font-bold text-on-surface-variant uppercase">Role</label>
-        <select value={formData.role} onChange={e => setFormData(prev => ({ ...prev, role: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
+      <Field label="Full Name"><input className={inputCls()} required value={form.full_name} onChange={e => setForm(p => ({ ...p, full_name: e.target.value }))} /></Field>
+      <Field label="Email"><input type="email" className={inputCls()} required value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} /></Field>
+      <Field label="Role">
+        <select className={inputCls()} value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
           <option>Driver</option><option>Dispatcher</option><option>System Admin</option>
         </select>
-      </div>
-      <div><label className="text-xs font-bold text-on-surface-variant uppercase">Phone</label><input type="text" value={formData.phone} onChange={e => setFormData(prev => ({ ...prev, phone: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-      <button disabled={isSaving} type="submit" className="mt-4 primary-gradient text-on-primary h-10 rounded-lg font-bold text-sm disabled:opacity-60">{isSaving ? 'Saving...' : 'Save User'}</button>
+      </Field>
+      <Field label="Phone"><input className={inputCls()} value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} /></Field>
+      <button disabled={saving} type="submit" className="mt-2 primary-gradient text-on-primary h-10 rounded-lg font-bold text-sm disabled:opacity-60">
+        {saving ? 'Saving...' : isEdit ? 'Update User' : 'Save User'}
+      </button>
     </form>
   );
 }
 
-function FleetForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [formData, setFormData] = useState({
-    id: '',
-    name: '',
-    capacity_kg: 0,
-    volume_m3: 0,
-    ev: false,
-    driver_name: '',
-  });
-  const [isSaving, setIsSaving] = useState(false);
+// ─── Fleet Form (Create + Edit) ───────────────────────────────────────────────
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+function FleetForm({ initial, onClose, onCreated }: { initial?: any; onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState({
+    id: initial?.id || '',
+    name: initial?.name || '',
+    capacity_kg: initial?.capacity_kg ?? 0,
+    volume_m3: initial?.volume_m3 ?? 0,
+    ev: initial?.ev ?? false,
+    driver_name: initial?.driver_name || '',
+    license_plate: initial?.license_plate || '',
+    cost_per_km: initial?.cost_per_km ?? 0,
+    max_shift_hours: initial?.max_shift_hours ?? 8,
+  });
+  const [saving, setSaving] = useState(false);
+  const isEdit = !!initial;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
     try {
-      setIsSaving(true);
-      await api.createFleetVehicle(formData);
+      if (isEdit) {
+        const { id, ...updateData } = form;
+        await api.updateFleetVehicle(initial.id, updateData);
+      } else {
+        await api.createFleetVehicle(form);
+      }
       onCreated();
-      window.alert('Tao vehicle thanh cong.');
       onClose();
-    } catch (error) {
-      console.error(error);
-      window.alert('Khong the tao vehicle.');
-    } finally {
-      setIsSaving(false);
-    }
+    } catch (err) { console.error(err); window.alert(isEdit ? 'Cập nhật thất bại.' : 'Tạo vehicle thất bại.'); }
+    finally { setSaving(false); }
   };
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-      <div><label className="text-xs font-bold text-on-surface-variant uppercase">Vehicle ID</label><input type="text" required value={formData.id} onChange={e => setFormData(prev => ({ ...prev, id: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-      <div><label className="text-xs font-bold text-on-surface-variant uppercase">Vehicle Name</label><input type="text" required value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-      <div className="grid grid-cols-2 gap-4">
-        <div><label className="text-xs font-bold text-on-surface-variant uppercase">Max Weight (kg)</label><input type="number" required value={formData.capacity_kg} onChange={e => setFormData(prev => ({ ...prev, capacity_kg: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-        <div><label className="text-xs font-bold text-on-surface-variant uppercase">Max Volume (m3)</label><input type="number" required value={formData.volume_m3} onChange={e => setFormData(prev => ({ ...prev, volume_m3: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+      {!isEdit && <Field label="Vehicle ID"><input className={inputCls()} required value={form.id} onChange={e => setForm(p => ({ ...p, id: e.target.value }))} placeholder="e.g. TRK-001" /></Field>}
+      <Field label="Vehicle Name"><input className={inputCls()} required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Max Weight (kg)"><input type="number" className={inputCls()} required value={form.capacity_kg} onChange={e => setForm(p => ({ ...p, capacity_kg: Number(e.target.value) }))} /></Field>
+        <Field label="Max Volume (m³)"><input type="number" className={inputCls()} required value={form.volume_m3} onChange={e => setForm(p => ({ ...p, volume_m3: Number(e.target.value) }))} /></Field>
       </div>
-      <div>
-        <label className="text-xs font-bold text-on-surface-variant uppercase">Vehicle Type</label>
-        <select value={formData.ev ? 'Electric Van' : 'Delivery Van'} onChange={e => setFormData(prev => ({ ...prev, ev: e.target.value === 'Electric Van' }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
-          <option>Delivery Van</option><option>Heavy Truck</option><option>Electric Van</option>
-        </select>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Cost/km"><input type="number" step="0.01" className={inputCls()} value={form.cost_per_km} onChange={e => setForm(p => ({ ...p, cost_per_km: Number(e.target.value) }))} /></Field>
+        <Field label="Max Shift (hrs)"><input type="number" className={inputCls()} value={form.max_shift_hours} onChange={e => setForm(p => ({ ...p, max_shift_hours: Number(e.target.value) }))} /></Field>
       </div>
-      <div><label className="text-xs font-bold text-on-surface-variant uppercase">Driver Name</label><input type="text" value={formData.driver_name} onChange={e => setFormData(prev => ({ ...prev, driver_name: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-      <button disabled={isSaving} type="submit" className="mt-4 primary-gradient text-on-primary h-10 rounded-lg font-bold text-sm disabled:opacity-60">{isSaving ? 'Saving...' : 'Save Vehicle'}</button>
+      <Field label="License Plate"><input className={inputCls()} value={form.license_plate} onChange={e => setForm(p => ({ ...p, license_plate: e.target.value }))} placeholder="e.g. 30A-12345" /></Field>
+      <Field label="Driver Name"><input className={inputCls()} value={form.driver_name} onChange={e => setForm(p => ({ ...p, driver_name: e.target.value }))} /></Field>
+      <label className="flex items-center gap-3 cursor-pointer p-3 bg-surface-container-low rounded-lg border border-outline-variant/10 hover:bg-surface-container transition-colors">
+        <input type="checkbox" checked={form.ev} onChange={e => setForm(p => ({ ...p, ev: e.target.checked }))} className="w-4 h-4 rounded accent-primary" />
+        <div className="flex items-center gap-2 text-sm font-semibold text-on-surface"><Zap size={16} className="text-primary" /> Electric Vehicle (EV)</div>
+      </label>
+      <button disabled={saving} type="submit" className="mt-2 primary-gradient text-on-primary h-10 rounded-lg font-bold text-sm disabled:opacity-60">
+        {saving ? 'Saving...' : isEdit ? 'Update Vehicle' : 'Save Vehicle'}
+      </button>
     </form>
   );
 }
 
-function DepotForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [formData, setFormData] = useState({
-    name: '',
-    lat: 0,
-    lng: 0,
-  });
-  const [isSaving, setIsSaving] = useState(false);
+// ─── Depot Form (Create + Edit) ───────────────────────────────────────────────
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+function DepotForm({ initial, onClose, onCreated }: { initial?: any; onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState({
+    name: initial?.name || '',
+    address: initial?.address || '',
+    lat: initial?.coordinates?.lat ?? 0,
+    lng: initial?.coordinates?.lng ?? 0,
+  });
+  const [saving, setSaving] = useState(false);
+  const isEdit = !!initial;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
     try {
-      setIsSaving(true);
-      await api.createDepot({
-        name: formData.name,
-        coordinates: { lat: formData.lat, lng: formData.lng },
-      });
+      const payload = { name: form.name, coordinates: { lat: form.lat, lng: form.lng } };
+      if (isEdit) {
+        await api.updateDepot(initial.id, payload);
+      } else {
+        await api.createDepot(payload);
+      }
       onCreated();
-      window.alert('Tao depot thanh cong.');
       onClose();
-    } catch (error) {
-      console.error(error);
-      window.alert('Khong the tao depot.');
-    } finally {
-      setIsSaving(false);
-    }
+    } catch (err) { console.error(err); window.alert(isEdit ? 'Cập nhật thất bại.' : 'Tạo depot thất bại.'); }
+    finally { setSaving(false); }
   };
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-      <div><label className="text-xs font-bold text-on-surface-variant uppercase">Depot Name</label><input type="text" required value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-      <div><label className="text-xs font-bold text-on-surface-variant uppercase">Address</label><input type="text" required className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-      <div className="grid grid-cols-2 gap-4">
-        <div><label className="text-xs font-bold text-on-surface-variant uppercase">Latitude</label><input type="number" step="0.000001" value={formData.lat} onChange={e => setFormData(prev => ({ ...prev, lat: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-        <div><label className="text-xs font-bold text-on-surface-variant uppercase">Longitude</label><input type="number" step="0.000001" value={formData.lng} onChange={e => setFormData(prev => ({ ...prev, lng: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+      <Field label="Depot Name"><input className={inputCls()} required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></Field>
+      <Field label="Address"><input className={inputCls()} value={form.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} placeholder="e.g. 123 Giai Phong, Ha Noi" /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Latitude"><input type="number" step="0.000001" className={inputCls()} value={form.lat || ''} onChange={e => setForm(p => ({ ...p, lat: Number(e.target.value) }))} placeholder="e.g. 21.028" /></Field>
+        <Field label="Longitude"><input type="number" step="0.000001" className={inputCls()} value={form.lng || ''} onChange={e => setForm(p => ({ ...p, lng: Number(e.target.value) }))} placeholder="e.g. 105.834" /></Field>
       </div>
-      <div className="flex items-center gap-2 mt-2">
+      <div className="flex items-center gap-2">
         <span className="text-sm text-outline cursor-pointer hover:text-primary transition-colors flex items-center gap-1 font-medium"><MapPin size={16} /> Auto-Geocode from Address</span>
       </div>
-      <button disabled={isSaving} type="submit" className="mt-4 primary-gradient text-on-primary h-10 rounded-lg font-bold text-sm disabled:opacity-60">{isSaving ? 'Saving...' : 'Save Depot'}</button>
+      <button disabled={saving} type="submit" className="mt-2 primary-gradient text-on-primary h-10 rounded-lg font-bold text-sm disabled:opacity-60">
+        {saving ? 'Saving...' : isEdit ? 'Update Depot' : 'Save Depot'}
+      </button>
     </form>
   );
 }
 
-function UsersTable({ usersData }: { usersData: any[] }) {
+// ─── Tables ───────────────────────────────────────────────────────────────────
+
+function ActionBtns({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+  return (
+    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+      <button onClick={onEdit} title="Edit" className="p-2 text-outline hover:text-primary transition-colors bg-surface-container-low rounded-lg hover:bg-primary/10"><Edit2 size={15} /></button>
+      <button onClick={onDelete} title="Delete" className="p-2 text-outline hover:text-error transition-colors bg-surface-container-low rounded-lg hover:bg-error/10"><Trash2 size={15} /></button>
+    </div>
+  );
+}
+
+function UsersTable({ usersData, onEdit, onDelete }: { usersData: any[]; onEdit: (u: any) => void; onDelete: (u: any) => void }) {
   return (
     <table className="w-full text-left text-sm whitespace-nowrap">
       <thead className="bg-surface-container-low/50 sticky top-0 z-10 font-bold text-on-surface-variant uppercase text-xs tracking-wider border-b border-outline-variant/10">
-        <tr><th className="px-6 py-4">User / Driver</th><th className="px-6 py-4">Role</th><th className="px-6 py-4">Assigned Vehicle</th><th className="px-6 py-4">Status</th><th className="px-6 py-4 text-right">Actions</th></tr>
+        <tr><th className="px-6 py-4">User / Driver</th><th className="px-6 py-4">Role</th><th className="px-6 py-4">Phone</th><th className="px-6 py-4">Status</th><th className="px-6 py-4 text-right">Actions</th></tr>
       </thead>
       <tbody className="divide-y divide-outline-variant/10">
-        {usersData.length === 0 ? (
-          <tr><td colSpan={5} className="px-6 py-4 text-sm text-on-surface-variant">No users found.</td></tr>
-        ) : (
-          usersData.map((user) => (
-            <UserRow
-              key={user.id}
-              name={user.full_name || 'Unknown'}
-              email={user.email || '-'}
-              role={user.role || 'N/A'}
-              vehicle="-"
-              status="active"
-            />
+        {usersData.length === 0
+          ? <tr><td colSpan={5} className="px-6 py-8 text-sm text-on-surface-variant text-center">No users found. Click "Add User/Driver" to create one.</td></tr>
+          : usersData.map(u => (
+            <tr key={u.id} className="hover:bg-surface-container-low/50 transition-colors group">
+              <td className="px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-bold text-xs uppercase shrink-0">
+                    {(u.full_name || '?').split(' ').map((n: string) => n[0]).join('').substring(0, 2)}
+                  </div>
+                  <div><p className="font-bold text-on-surface text-sm">{u.full_name || 'Unknown'}</p><p className="text-[11px] text-on-surface-variant mt-0.5">{u.email || '-'}</p></div>
+                </div>
+              </td>
+              <td className="px-6 py-4"><span className="font-bold text-on-surface bg-surface-container px-3 py-1 rounded-lg text-[11px] uppercase tracking-wider">{u.role || 'N/A'}</span></td>
+              <td className="px-6 py-4 text-on-surface-variant text-xs font-mono">{u.phone || '-'}</td>
+              <td className="px-6 py-4"><span className="bg-success/10 text-success px-3 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 w-fit"><CheckCircle2 size={12} /> Active</span></td>
+              <td className="px-6 py-4 text-right"><ActionBtns onEdit={() => onEdit(u)} onDelete={() => onDelete(u)} /></td>
+            </tr>
           ))
-        )}
+        }
       </tbody>
     </table>
   );
 }
 
-function UserRow({ name, email, role, vehicle, status }: any) {
-  const getStatusBadge = () => {
-    switch (status) {
-      case 'active': return <span className="bg-success/10 text-success px-3 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 w-fit"><CheckCircle2 size={12} /> Active</span>;
-      case 'invited': return <span className="bg-warning/10 text-warning px-3 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 w-fit"><Mail size={12} /> Invited</span>;
-      default: return null;
-    }
-  };
-
-  return (
-    <tr className="hover:bg-surface-container-low/50 transition-colors group">
-      <td className="px-6 py-4"><div className="flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-bold text-xs uppercase">{name.split(' ').map((n: string) => n[0]).join('').substring(0, 2)}</div><div><p className="font-bold text-on-surface text-sm">{name}</p><p className="text-[11px] text-on-surface-variant mt-0.5">{email}</p></div></div></td>
-      <td className="px-6 py-4"><span className="font-bold text-on-surface bg-surface-container px-3 py-1 rounded-lg text-[11px] uppercase tracking-wider">{role}</span></td>
-      <td className="px-6 py-4 font-mono text-on-surface-variant text-xs">{vehicle !== '-' ? <span className="px-2 py-1 bg-surface-container-high rounded border border-outline-variant/20">{vehicle}</span> : '-'}</td>
-      <td className="px-6 py-4">{getStatusBadge()}</td>
-      <td className="px-6 py-4 text-right"><div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button className="p-2 text-outline hover:text-primary transition-colors bg-surface-container-low rounded-lg"><Edit2 size={16} /></button><button className="p-2 text-outline hover:text-error transition-colors bg-surface-container-low rounded-lg"><Trash2 size={16} /></button></div></td>
-    </tr>
-  );
-}
-
-function FleetTable({ fleetData }: { fleetData: any[] }) {
+function FleetTable({ fleetData, onEdit, onDelete }: { fleetData: any[]; onEdit: (v: any) => void; onDelete: (v: any) => void }) {
   return (
     <table className="w-full text-left text-sm whitespace-nowrap">
       <thead className="bg-surface-container-low/50 sticky top-0 z-10 font-bold text-on-surface-variant uppercase text-xs tracking-wider border-b border-outline-variant/10">
-        <tr><th className="px-6 py-4">Vehicle ID</th><th className="px-6 py-4">Type & Model</th><th className="px-6 py-4">Capacity (kg/m3)</th><th className="px-6 py-4">Current Driver</th><th className="px-6 py-4 text-right">Actions</th></tr>
+        <tr><th className="px-6 py-4">Vehicle ID</th><th className="px-6 py-4">Type & Model</th><th className="px-6 py-4">Capacity (kg/m³)</th><th className="px-6 py-4">Current Driver</th><th className="px-6 py-4">License</th><th className="px-6 py-4 text-right">Actions</th></tr>
       </thead>
       <tbody className="divide-y divide-outline-variant/10">
-        {fleetData.length === 0 ? (
-          <tr><td colSpan={5} className="px-6 py-4 text-sm text-on-surface-variant">No vehicles found.</td></tr>
-        ) : (
-          fleetData.map(vehicle => (
-            <FleetRow
-              key={vehicle.id}
-              id={vehicle.id}
-              model={vehicle.name}
-              type={vehicle.ev ? 'Electric Van' : 'Delivery Vehicle'}
-              capKg={String(vehicle.capacity_kg || 0)}
-              capVol={String(vehicle.volume_m3 || 0)}
-              driver={vehicle.driver_name || 'Unassigned'}
-            />
+        {fleetData.length === 0
+          ? <tr><td colSpan={6} className="px-6 py-8 text-sm text-on-surface-variant text-center">No vehicles found. Click "Add Vehicle" to create one.</td></tr>
+          : fleetData.map(v => (
+            <tr key={v.id} className="hover:bg-surface-container-low/50 transition-colors group">
+              <td className="px-6 py-4"><span className="font-extrabold text-primary font-mono bg-primary/10 px-3 py-1.5 rounded-lg border border-primary/20">{v.id}</span></td>
+              <td className="px-6 py-4">
+                <div className="flex items-center gap-2">
+                  {v.ev && <Zap size={14} className="text-primary shrink-0" />}
+                  <div><p className="font-bold text-on-surface">{v.name}</p><p className="text-[11px] text-on-surface-variant mt-0.5">{v.ev ? 'Electric Van' : 'Delivery Vehicle'}</p></div>
+                </div>
+              </td>
+              <td className="px-6 py-4 font-mono text-on-surface-variant text-xs">{v.capacity_kg ?? 0} <span className="opacity-40">kg</span> / {v.volume_m3 ?? 0} <span className="opacity-40">m³</span></td>
+              <td className="px-6 py-4 font-medium text-on-surface-variant">{v.driver_name || <span className="text-outline italic text-xs">Unassigned</span>}</td>
+              <td className="px-6 py-4 text-xs text-on-surface-variant font-mono">{v.license_plate || '-'}</td>
+              <td className="px-6 py-4 text-right"><ActionBtns onEdit={() => onEdit(v)} onDelete={() => onDelete(v)} /></td>
+            </tr>
           ))
-        )}
+        }
       </tbody>
     </table>
   );
 }
 
-function FleetRow({ id, model, type, capKg, capVol, driver }: any) {
-  return (
-    <tr className="hover:bg-surface-container-low/50 transition-colors group">
-      <td className="px-6 py-4"><span className="font-extrabold text-primary font-mono bg-primary/10 px-3 py-1.5 rounded-lg border border-primary/20">{id}</span></td>
-      <td className="px-6 py-4"><p className="font-bold text-on-surface">{model}</p><p className="text-[11px] text-on-surface-variant mt-0.5">{type}</p></td>
-      <td className="px-6 py-4 font-mono text-on-surface-variant text-xs">{capKg} <span className="opacity-40">kg</span> / {capVol} <span className="opacity-40">m3</span></td>
-      <td className="px-6 py-4 font-medium text-on-surface-variant">{driver}</td>
-      <td className="px-6 py-4 text-right"><div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button className="p-2 text-outline hover:text-primary transition-colors bg-surface-container-low rounded-lg"><Edit2 size={16} /></button><button className="p-2 text-outline hover:text-error transition-colors bg-surface-container-low rounded-lg"><Trash2 size={16} /></button></div></td>
-    </tr>
-  );
-}
-
-function DepotsTable({ depotsData }: { depotsData: any[] }) {
+function DepotsTable({ depotsData, onEdit, onDelete }: { depotsData: any[]; onEdit: (d: any) => void; onDelete: (d: any) => void }) {
   return (
     <table className="w-full text-left text-sm whitespace-nowrap">
       <thead className="bg-surface-container-low/50 sticky top-0 z-10 font-bold text-on-surface-variant uppercase text-xs tracking-wider border-b border-outline-variant/10">
-        <tr><th className="px-6 py-4">Depot ID / Name</th><th className="px-6 py-4">Address</th><th className="px-6 py-4">Coordinates</th><th className="px-6 py-4">Type</th><th className="px-6 py-4 text-right">Actions</th></tr>
+        <tr><th className="px-6 py-4">Depot ID / Name</th><th className="px-6 py-4">Coordinates</th><th className="px-6 py-4">Type</th><th className="px-6 py-4 text-right">Actions</th></tr>
       </thead>
       <tbody className="divide-y divide-outline-variant/10">
-        {depotsData.length === 0 ? (
-          <tr><td colSpan={5} className="px-6 py-4 text-sm text-on-surface-variant">No depots found.</td></tr>
-        ) : (
-          depotsData.map((depot) => (
-            <DepotRow
-              key={depot.id}
-              id={depot.id}
-              name={depot.name || 'Unknown'}
-              address="-"
-              coords={`${depot.coordinates?.lat ?? 0}, ${depot.coordinates?.lng ?? 0}`}
-              type="Hub"
-            />
+        {depotsData.length === 0
+          ? <tr><td colSpan={4} className="px-6 py-8 text-sm text-on-surface-variant text-center">No depots found. Click "Add Depot" to create one.</td></tr>
+          : depotsData.map(d => (
+            <tr key={d.id} className="hover:bg-surface-container-low/50 transition-colors group">
+              <td className="px-6 py-4"><p className="font-bold text-on-surface">{d.name}</p><p className="font-mono text-[11px] text-outline mt-0.5">{d.id}</p></td>
+              <td className="px-6 py-4"><span className="font-mono text-xs text-primary bg-primary/5 px-2 py-1 rounded">{d.coordinates?.lat?.toFixed(5) ?? 0}, {d.coordinates?.lng?.toFixed(5) ?? 0}</span></td>
+              <td className="px-6 py-4"><span className="font-bold text-on-surface bg-surface-container px-3 py-1 rounded-lg text-[11px] uppercase tracking-wider">Hub</span></td>
+              <td className="px-6 py-4 text-right"><ActionBtns onEdit={() => onEdit(d)} onDelete={() => onDelete(d)} /></td>
+            </tr>
           ))
-        )}
+        }
       </tbody>
     </table>
-  );
-}
-
-function DepotRow({ id, name, address, coords, type }: any) {
-  return (
-    <tr className="hover:bg-surface-container-low/50 transition-colors group">
-      <td className="px-6 py-4"><p className="font-extrabold text-on-surface">{name}</p><p className="font-mono text-[11px] text-outline mt-0.5">{id}</p></td>
-      <td className="px-6 py-4 text-on-surface-variant text-sm truncate max-w-[200px]">{address}</td>
-      <td className="px-6 py-4 font-mono text-xs text-primary bg-primary/5 px-2 py-1 rounded inline-block mt-3">{coords}</td>
-      <td className="px-6 py-4"><span className="font-bold text-on-surface bg-surface-container px-3 py-1 rounded-lg text-[11px] uppercase tracking-wider">{type}</span></td>
-      <td className="px-6 py-4 text-right"><div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button className="p-2 text-outline hover:text-primary transition-colors bg-surface-container-low rounded-lg"><Edit2 size={16} /></button><button className="p-2 text-outline hover:text-error transition-colors bg-surface-container-low rounded-lg"><Trash2 size={16} /></button></div></td>
-    </tr>
   );
 }
 

@@ -128,6 +128,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     }),
+  deleteRoute: (routeId: string) =>
+    fetchApi<any>(`/api/v1/routes/${routeId}`, { method: 'DELETE' }),
 
   // V1 Metrics
   getDashboardMetrics: () => fetchApi<any>('/api/v1/metrics/dashboard'),

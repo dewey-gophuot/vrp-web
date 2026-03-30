@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Upload, Plus, MoreVertical, ChevronLeft, ChevronRight, Map, AlertTriangle, Settings2, MessageSquare, Route, X, FileSpreadsheet, MapPin } from 'lucide-react';
+import { Truck, Upload, Plus, Edit2, Trash2, ChevronLeft, ChevronRight, Map, AlertTriangle, Settings2, MessageSquare, Route, X, FileSpreadsheet, MapPin } from 'lucide-react';
 import api from '../api';
 
 export default function InputView() {
@@ -13,10 +13,15 @@ export default function InputView() {
   
   const [fleet, setFleet] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
+  const [editingLoc, setEditingLoc] = useState<any | null>(null);
+  const [deletingLocId, setDeletingLocId] = useState<string | null>(null);
+  const [isDeletingLoc, setIsDeletingLoc] = useState(false);
   const [pointForm, setPointForm] = useState({
     id: '',
     name: '',
     address: '',
+    lat: 0,
+    lng: 0,
     demand: 0,
     service_time: 15,
     time_window_start: '',
@@ -45,19 +50,15 @@ export default function InputView() {
 
   const handleAddPoint = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!pointForm.name.trim()) {
-      window.alert('Vui lòng nhập tên điểm giao.');
-      return;
-    }
-
+    if (!pointForm.name.trim()) { window.alert('Vui lòng nhập tên điểm giao.'); return; }
     try {
       setIsSubmittingPoint(true);
       await api.createLocation({
         id: pointForm.id || undefined,
         name: pointForm.name,
         address_string: pointForm.address,
-        lat: 0,
-        lng: 0,
+        lat: pointForm.lat,
+        lng: pointForm.lng,
         demand_kg: pointForm.demand,
         time_window_start: pointForm.time_window_start || undefined,
         time_window_end: pointForm.time_window_end || undefined,
@@ -65,22 +66,41 @@ export default function InputView() {
       });
       loadFleetAndLocations();
       setShowAddPoint(false);
-      setPointForm({
-        id: '',
-        name: '',
-        address: '',
-        demand: 0,
-        service_time: 15,
-        time_window_start: '',
-        time_window_end: '',
+      setPointForm({ id: '', name: '', address: '', lat: 0, lng: 0, demand: 0, service_time: 15, time_window_start: '', time_window_end: '' });
+    } catch (error) { console.error(error); window.alert('Không thể thêm điểm giao.'); }
+    finally { setIsSubmittingPoint(false); }
+  };
+
+  const handleEditPoint = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingLoc) return;
+    try {
+      setIsSubmittingPoint(true);
+      await api.updateLocation(editingLoc.id, {
+        name: editingLoc.name,
+        address_string: editingLoc.address_string || editingLoc.address || '',
+        lat: editingLoc.lat,
+        lng: editingLoc.lng,
+        demand_kg: editingLoc.demand_kg,
+        time_window_start: editingLoc.time_window_start || '',
+        time_window_end: editingLoc.time_window_end || '',
+        service_time_mins: editingLoc.service_time_mins || 15,
       });
-      window.alert('Đã thêm điểm giao thành công.');
-    } catch (error) {
-      console.error(error);
-      window.alert('Không thể thêm điểm giao.');
-    } finally {
-      setIsSubmittingPoint(false);
-    }
+      loadFleetAndLocations();
+      setEditingLoc(null);
+    } catch (error) { console.error(error); window.alert('Cập nhật thất bại.'); }
+    finally { setIsSubmittingPoint(false); }
+  };
+
+  const handleDeleteLocation = async () => {
+    if (!deletingLocId) return;
+    setIsDeletingLoc(true);
+    try {
+      await api.deleteLocation(deletingLocId);
+      loadFleetAndLocations();
+      setDeletingLocId(null);
+    } catch (error) { console.error(error); window.alert('Xóa thất bại.'); }
+    finally { setIsDeletingLoc(false); }
   };
 
   const handleUploadManifest = async () => {
@@ -282,14 +302,26 @@ export default function InputView() {
                     <tr><td colSpan={5} className="px-6 py-4 text-center text-sm text-on-surface-variant">No locations found. Add or import points.</td></tr>
                   ) : (
                     locations.map((loc, idx) => (
-                      <TableRow 
-                        key={loc.id || idx} 
-                        id={loc.id || `ORD-${idx+1}`} 
-                        name={loc.name} 
-                        address={loc.address_string || loc.address || 'Unknown'} 
-                        demand={loc.demand_kg || loc.demand || 0} 
-                        time={`${loc.time_window_start || 'Flexible'} - ${loc.time_window_end || ''}`} 
-                        timeStyle="primary" 
+                      <TableRow
+                        key={loc.id || idx}
+                        id={loc.id || `ORD-${idx+1}`}
+                        name={loc.name}
+                        address={loc.address_string || loc.address || 'Unknown'}
+                        demand={loc.demand_kg || loc.demand || 0}
+                        time={loc.time_window_start ? `${loc.time_window_start} - ${loc.time_window_end || ''}` : 'Flexible'}
+                        timeStyle="primary"
+                        onEdit={() => setEditingLoc({
+                          id: loc.id,
+                          name: loc.name,
+                          address_string: loc.address_string || loc.address || '',
+                          lat: loc.coordinates?.lat ?? loc.lat ?? 0,
+                          lng: loc.coordinates?.lng ?? loc.lng ?? 0,
+                          demand_kg: loc.demand_kg || loc.demand || 0,
+                          time_window_start: loc.time_window_start || '',
+                          time_window_end: loc.time_window_end || '',
+                          service_time_mins: loc.service_time_mins || loc.service_time || 15,
+                        })}
+                        onDelete={() => setDeletingLocId(loc.id)}
                       />
                     ))
                   )}
@@ -350,6 +382,10 @@ export default function InputView() {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Latitude</label><input type="number" step="0.000001" placeholder="e.g. 10.7769" value={pointForm.lat || ''} onChange={e => setPointForm(prev => ({ ...prev, lat: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Longitude</label><input type="number" step="0.000001" placeholder="e.g. 106.7009" value={pointForm.lng || ''} onChange={e => setPointForm(prev => ({ ...prev, lng: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div><label className="text-xs font-bold text-on-surface-variant uppercase">Demand / Weight (kg)</label><input type="number" step="0.1" required value={pointForm.demand} onChange={e => setPointForm(prev => ({ ...prev, demand: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
                 <div><label className="text-xs font-bold text-on-surface-variant uppercase">Service Time (mins)</label><input type="number" value={pointForm.service_time} onChange={e => setPointForm(prev => ({ ...prev, service_time: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
               </div>
@@ -395,17 +431,63 @@ export default function InputView() {
           </div>
         </div>
       )}
+      {/* Edit Location Modal */}
+      {editingLoc && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-outline/20 backdrop-blur-sm p-4">
+          <div className="bg-surface-container-lowest w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh]">
+            <div className="flex justify-between items-center p-6 border-b border-outline-variant/10">
+              <h3 className="text-xl font-bold text-on-surface font-headline">Edit Delivery Point</h3>
+              <button onClick={() => setEditingLoc(null)} className="text-outline hover:text-on-surface p-1 rounded-lg hover:bg-surface-container"><X size={20} /></button>
+            </div>
+            <form className="p-6 flex flex-col gap-4 overflow-y-auto" onSubmit={handleEditPoint}>
+              <div><label className="text-xs font-bold text-on-surface-variant uppercase">Tên điểm giao</label><input type="text" required value={editingLoc.name} onChange={e => setEditingLoc((p: any) => ({ ...p, name: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+              <div><label className="text-xs font-bold text-on-surface-variant uppercase">Address</label><input type="text" value={editingLoc.address_string} onChange={e => setEditingLoc((p: any) => ({ ...p, address_string: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Latitude</label><input type="number" step="0.000001" value={editingLoc.lat || ''} onChange={e => setEditingLoc((p: any) => ({ ...p, lat: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Longitude</label><input type="number" step="0.000001" value={editingLoc.lng || ''} onChange={e => setEditingLoc((p: any) => ({ ...p, lng: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Demand (kg)</label><input type="number" step="0.1" value={editingLoc.demand_kg} onChange={e => setEditingLoc((p: any) => ({ ...p, demand_kg: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Service Time (mins)</label><input type="number" value={editingLoc.service_time_mins} onChange={e => setEditingLoc((p: any) => ({ ...p, service_time_mins: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Time Window Start</label><input type="time" value={editingLoc.time_window_start} onChange={e => setEditingLoc((p: any) => ({ ...p, time_window_start: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Time Window End</label><input type="time" value={editingLoc.time_window_end} onChange={e => setEditingLoc((p: any) => ({ ...p, time_window_end: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+              </div>
+              <button type="submit" disabled={isSubmittingPoint} className="mt-2 primary-gradient text-on-primary h-10 rounded-xl font-bold text-sm shadow-md disabled:opacity-60">
+                {isSubmittingPoint ? 'Saving...' : 'Update Point'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Location Confirmation */}
+      {deletingLocId && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-outline/20 backdrop-blur-sm p-4">
+          <div className="bg-surface-container-lowest w-full max-w-sm rounded-2xl shadow-2xl p-8 text-center animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-14 h-14 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4"><Trash2 size={26} className="text-error" /></div>
+            <h3 className="text-lg font-bold text-on-surface mb-2">Delete this point?</h3>
+            <p className="text-sm text-on-surface-variant mb-6">This will remove it from all route calculations.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeletingLocId(null)} className="flex-1 h-10 rounded-xl bg-surface-container hover:bg-surface-container-high font-bold text-sm text-on-surface">Cancel</button>
+              <button onClick={handleDeleteLocation} disabled={isDeletingLoc} className="flex-1 h-10 rounded-xl bg-error text-white font-bold text-sm disabled:opacity-60 hover:bg-error/90">
+                {isDeletingLoc ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
 }
 
-function TableRow({ id, name, address, demand, time, timeStyle }: any) {
+function TableRow({ id, name, address, demand, time, timeStyle, onEdit, onDelete }: any) {
   const getBadgeStyle = (style: string) => {
     switch (style) {
       case 'primary': return 'bg-surface-container-high text-primary';
       case 'secondary': return 'bg-secondary-container text-on-secondary-container';
-      case 'tertiary': return 'bg-tertiary-fixed text-on-tertiary-fixed-variant';
       default: return 'bg-surface-container text-on-surface';
     }
   };
@@ -419,14 +501,13 @@ function TableRow({ id, name, address, demand, time, timeStyle }: any) {
       </td>
       <td className="px-6 py-5 text-on-surface text-sm font-mono">{demand}</td>
       <td className="px-6 py-5">
-        <span className={`px-3 py-1.5 rounded-full text-[11px] font-bold ${getBadgeStyle(timeStyle)}`}>
-          {time}
-        </span>
+        <span className={`px-3 py-1.5 rounded-full text-[11px] font-bold ${getBadgeStyle(timeStyle)}`}>{time}</span>
       </td>
-      <td className="px-6 py-5 text-right opacity-50 group-hover:opacity-100 transition-opacity">
-        <button className="text-outline hover:text-primary transition-colors p-2 rounded-lg hover:bg-surface-container">
-          <MoreVertical size={18} />
-        </button>
+      <td className="px-6 py-5 text-right">
+        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={onEdit} title="Edit" className="p-2 text-outline hover:text-primary bg-surface-container-low rounded-lg hover:bg-primary/10 transition-colors"><Edit2 size={14} /></button>
+          <button onClick={onDelete} title="Delete" className="p-2 text-outline hover:text-error bg-surface-container-low rounded-lg hover:bg-error/10 transition-colors"><Trash2 size={14} /></button>
+        </div>
       </td>
     </tr>
   );

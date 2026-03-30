@@ -16,13 +16,26 @@ export default function ReportsView() {
         setRouteId(selected.route_id);
         setVehicleId(selected.vehicle_id || 'N/A');
 
-        const [reportRes, metricRes] = await Promise.all([
+        const [reportRes, metricRes, manifestRes] = await Promise.all([
           api.getRouteReport(selected.route_id),
           api.getRouteMetrics(selected.route_id),
+          api.getRouteManifest(selected.route_id).catch(() => null),
         ]);
 
         setMetrics(metricRes);
-        setStops(reportRes.stops || []);
+        // Prefer manifest stops (objects with name/address) over raw stop IDs
+        if (manifestRes?.stops && manifestRes.stops.length > 0) {
+          setStops(manifestRes.stops);
+        } else {
+          // Fallback: wrap raw IDs as objects for display
+          setStops((reportRes.stops || []).map((stopId: string) => ({
+            stop_id: stopId,
+            name: stopId,
+            address: '',
+            sequence: 0,
+            status: 'planned',
+          })));
+        }
       })
       .catch(console.error);
   }, []);
@@ -96,7 +109,7 @@ export default function ReportsView() {
             <span className="text-error text-xs font-bold bg-error-container/50 px-2.5 py-1 rounded-full">-12%</span>
           </div>
           <p className="text-on-surface text-3xl font-headline font-bold">
-            {Math.floor(Number(metrics?.total_duration_minutes || 0) / 60)}h {Number(metrics?.total_duration_minutes || 0) % 60}m
+            {Math.floor(Math.round(Number(metrics?.total_duration_minutes || 0)) / 60)}h {Math.round(Number(metrics?.total_duration_minutes || 0)) % 60}m
           </p>
           <div className="mt-5 flex items-center gap-1.5 text-xs text-on-surface-variant font-medium">
             <Clock size={14} />
@@ -123,9 +136,9 @@ export default function ReportsView() {
                 <tr className="bg-surface-container-low text-on-surface-variant uppercase text-[10px] font-bold tracking-widest">
                   <th className="px-6 py-4">#</th>
                   <th className="px-6 py-4">Stop Location</th>
-                  <th className="px-6 py-4">Arrival</th>
-                  <th className="px-6 py-4 text-center">Qty (Units)</th>
-                  <th className="px-6 py-4 text-right">Distance (Prev)</th>
+                  <th className="px-6 py-4">Address</th>
+                  <th className="px-6 py-4 text-center">Status</th>
+                  <th className="px-6 py-4 text-right">Sequence</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-container">
@@ -134,15 +147,15 @@ export default function ReportsView() {
                     <td colSpan={5} className="px-6 py-5 text-sm text-on-surface-variant">No stops available.</td>
                   </tr>
                 ) : (
-                  stops.slice(0, 8).map((stop, index) => (
+                  stops.slice(0, 8).map((stop: any, index: number) => (
                     <TimelineRow
-                      key={`${stop}-${index}`}
+                      key={`${stop.stop_id || stop}-${index}`}
                       num={String(index + 1).padStart(2, '0')}
-                      name={stop}
-                      desc="Planned stop"
+                      name={stop.name || stop.stop_id || stop}
+                      desc={stop.address || ''}
                       arrival="N/A"
-                      qty="-"
-                      dist="-"
+                      qty={stop.status || '-'}
+                      dist={stop.sequence ? `#${stop.sequence}` : '-'}
                     />
                   ))
                 )}
