@@ -1,7 +1,32 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ChevronRight, Share, Download, Share2, Printer, FileText, Table, Database, Copy, ExternalLink, Clock } from 'lucide-react';
+import api from '../api';
 
 export default function ReportsView() {
+  const [routeId, setRouteId] = useState('N/A');
+  const [vehicleId, setVehicleId] = useState('N/A');
+  const [metrics, setMetrics] = useState<any>(null);
+  const [stops, setStops] = useState<any[]>([]);
+
+  useEffect(() => {
+    api.listRoutes()
+      .then(async (routes) => {
+        if (!routes || routes.length === 0) return;
+        const selected = routes[0];
+        setRouteId(selected.route_id);
+        setVehicleId(selected.vehicle_id || 'N/A');
+
+        const [reportRes, metricRes] = await Promise.all([
+          api.getRouteReport(selected.route_id),
+          api.getRouteMetrics(selected.route_id),
+        ]);
+
+        setMetrics(metricRes);
+        setStops(reportRes.stops || []);
+      })
+      .catch(console.error);
+  }, []);
+
   return (
     <div className="flex-1 overflow-y-auto p-8 lg:p-12 bg-background">
       {/* Breadcrumbs & Header */}
@@ -13,10 +38,10 @@ export default function ReportsView() {
         </div>
         <div className="flex flex-wrap justify-between items-end gap-4">
           <div>
-            <h2 className="text-on-surface font-headline text-4xl font-extrabold tracking-tight">VRP-2024-001</h2>
+            <h2 className="text-on-surface font-headline text-4xl font-extrabold tracking-tight">{routeId}</h2>
             <p className="text-on-surface-variant mt-2">
-              Driver: <span className="text-on-surface font-semibold">John Doe</span> • 
-              Vehicle: <span className="text-on-surface font-semibold">Freightliner M2 (TRK-9902)</span>
+              Driver: <span className="text-on-surface font-semibold">Unknown</span> • 
+              Vehicle: <span className="text-on-surface font-semibold">{vehicleId}</span>
             </p>
           </div>
           <div className="flex gap-2">
@@ -35,7 +60,7 @@ export default function ReportsView() {
             <span className="text-on-surface-variant text-sm font-medium">Total Distance</span>
             <span className="text-error text-xs font-bold bg-error-container/50 px-2.5 py-1 rounded-full">-5.2%</span>
           </div>
-          <p className="text-on-surface text-3xl font-headline font-bold">142.5 km</p>
+          <p className="text-on-surface text-3xl font-headline font-bold">{metrics?.total_distance_km ?? 0} km</p>
           <div className="mt-5 w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
             <div className="h-full bg-primary" style={{ width: '65%' }}></div>
           </div>
@@ -46,7 +71,7 @@ export default function ReportsView() {
             <span className="text-on-surface-variant text-sm font-medium">Total Stops</span>
             <span className="text-on-surface-variant text-xs font-bold bg-surface-container px-2.5 py-1 rounded-full">Optimal</span>
           </div>
-          <p className="text-on-surface text-3xl font-headline font-bold">12 Stops</p>
+          <p className="text-on-surface text-3xl font-headline font-bold">{metrics?.stop_count ?? 0} Stops</p>
           <div className="mt-5 flex gap-1.5">
             <div className="h-1.5 flex-1 bg-on-tertiary-container rounded-full"></div>
             <div className="h-1.5 flex-1 bg-on-tertiary-container rounded-full"></div>
@@ -59,7 +84,7 @@ export default function ReportsView() {
             <span className="text-on-surface-variant text-sm font-medium">Capacity Used</span>
             <span className="text-on-tertiary-fixed-variant text-xs font-bold bg-tertiary-fixed px-2.5 py-1 rounded-full">+2.1%</span>
           </div>
-          <p className="text-on-surface text-3xl font-headline font-bold">88.4%</p>
+          <p className="text-on-surface text-3xl font-headline font-bold">{metrics?.completion_pct ?? 0}%</p>
           <div className="mt-5 w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
             <div className="h-full bg-on-tertiary-fixed-variant" style={{ width: '88%' }}></div>
           </div>
@@ -70,7 +95,9 @@ export default function ReportsView() {
             <span className="text-on-surface-variant text-sm font-medium">Est. Duration</span>
             <span className="text-error text-xs font-bold bg-error-container/50 px-2.5 py-1 rounded-full">-12%</span>
           </div>
-          <p className="text-on-surface text-3xl font-headline font-bold">6h 45m</p>
+          <p className="text-on-surface text-3xl font-headline font-bold">
+            {Math.floor(Number(metrics?.total_duration_minutes || 0) / 60)}h {Number(metrics?.total_duration_minutes || 0) % 60}m
+          </p>
           <div className="mt-5 flex items-center gap-1.5 text-xs text-on-surface-variant font-medium">
             <Clock size={14} />
             Scheduled: 08:00 - 14:45
@@ -102,32 +129,23 @@ export default function ReportsView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-container">
-                <TimelineRow 
-                  num="01" 
-                  name="Distribution Center A" desc="Central Hub, Sector 4" 
-                  arrival="08:00 AM" qty="Start" qtyStyle="badge" dist="0.0 km" 
-                />
-                <TimelineRow 
-                  num="02" 
-                  name="Metro Grocers #42" desc="North Parkway Blvd" 
-                  arrival="08:45 AM" qty="240" dist="12.4 km" 
-                />
-                <TimelineRow 
-                  num="03" 
-                  name="City Hospital Pharmacy" desc="Medical District East" 
-                  arrival="09:30 AM" qty="115" dist="8.2 km" 
-                />
-                <TimelineRow 
-                  num="04" 
-                  name="Logistics Depot 2 (Refill)" desc="Industrial Zone B" 
-                  arrival="10:15 AM" qty="+500" qtyStyle="highlight" dist="15.1 km" 
-                  highlightRow={true}
-                />
-                <TimelineRow 
-                  num="05" 
-                  name="Regional Mall Center" desc="Westside Retail Park" 
-                  arrival="11:05 AM" qty="180" dist="9.7 km" 
-                />
+                {stops.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-5 text-sm text-on-surface-variant">No stops available.</td>
+                  </tr>
+                ) : (
+                  stops.slice(0, 8).map((stop, index) => (
+                    <TimelineRow
+                      key={`${stop}-${index}`}
+                      num={String(index + 1).padStart(2, '0')}
+                      name={stop}
+                      desc="Planned stop"
+                      arrival="N/A"
+                      qty="-"
+                      dist="-"
+                    />
+                  ))
+                )}
               </tbody>
             </table>
           </div>

@@ -1,7 +1,16 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Bell, Settings2, Route, Truck, MapPin, DollarSign, MoreVertical, Plus, Minus, Layers } from 'lucide-react';
+import api from '../api';
 
 export default function DashboardView() {
+  const [metrics, setMetrics] = useState<any>(null);
+
+  useEffect(() => {
+    api.getDashboardMetrics()
+      .then(res => setMetrics(res))
+      .catch(console.error);
+  }, []);
+
   return (
     <div className="flex-1 overflow-y-auto bg-surface p-8">
       {/* Header */}
@@ -30,10 +39,10 @@ export default function DashboardView() {
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-        <MetricCard icon={Route} title="Total Active Routes" value="128" trend="+5%" trendType="positive" />
-        <MetricCard icon={Truck} title="Vehicle Utilization" value="84.2%" trend="-2%" trendType="negative" />
-        <MetricCard icon={MapPin} title="Total Distance" value="14,250" unit="km" trend="+12%" trendType="positive" />
-        <MetricCard icon={DollarSign} title="Cost Savings" value="$12,400" trend="+18%" trendType="positive" />
+        <MetricCard icon={Route} title="Total Active Routes" value={metrics?.total_active_routes?.toLocaleString() || "---"} trend="+5%" trendType="positive" />
+        <MetricCard icon={Truck} title="Vehicle Utilization" value={metrics ? `${metrics.vehicle_utilization_pct}%` : "---"} trend="-2%" trendType="negative" />
+        <MetricCard icon={MapPin} title="Total Distance" value={metrics?.total_distance_km?.toLocaleString() || "---"} unit="km" trend="+12%" trendType="positive" />
+        <MetricCard icon={DollarSign} title="Cost Savings" value={metrics ? `$${metrics.cost_savings_usd?.toLocaleString() || 0}` : "---"} trend="+18%" trendType="positive" />
       </div>
 
       {/* Optimization Performance & Projects */}

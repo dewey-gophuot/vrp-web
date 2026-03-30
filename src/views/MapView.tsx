@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search, Bell, Settings, Plus, Minus, Locate, Layers, Info, RefreshCw, Truck, Zap, MoreVertical, GripVertical, CheckCircle2, X } from 'lucide-react';
+import api from '../api';
 
 const INITIAL_ROUTES = [
   {
@@ -45,6 +46,40 @@ export default function MapView() {
   const [isDispatching, setIsDispatching] = useState(false);
   const [dispatched, setDispatched] = useState(false);
 
+  useEffect(() => {
+    api.listRoutes()
+      .then(async (res) => {
+        if (!res || res.length === 0) return;
+
+        const manifests = await Promise.all(
+          res.map((route: any) => api.getRouteManifest(route.route_id).catch(() => null)),
+        );
+
+        const mapped = res.map((route: any, index: number) => {
+          const manifest = manifests[index];
+          const stops = (manifest?.stops || []).map((stop: any) => ({
+            id: stop.stop_id,
+            name: stop.name || 'Stop',
+            address: stop.address || 'N/A',
+            demand: stop.status || 'pending',
+          }));
+
+          return {
+          id: route.route_id,
+          name: `Route ${index + 1} - ${route.route_id}`,
+          vehicle: route.vehicle_id || 'Unknown',
+          color: ['bg-primary', 'bg-warning', 'bg-success', 'bg-secondary'][index % 4],
+          distance: `${Number(route.total_distance_km || 0).toFixed(1)} km`,
+          time: `${Math.max(1, Math.floor(Number(route.total_duration_minutes || 0) / 60))}h ${Math.max(0, Number(route.total_duration_minutes || 0) % 60)}m`,
+          stops,
+        };
+        });
+
+        setRoutes(mapped);
+      })
+      .catch(console.error);
+  }, []);
+
   // Drag and Drop Handlers
   const handleDragStart = (e: React.DragEvent, stopId: string, sourceRouteId: string) => {
     e.dataTransfer.setData('stopId', stopId);
@@ -57,7 +92,7 @@ export default function MapView() {
     e.dataTransfer.dropEffect = 'move';
   };
 
-  const handleDrop = (e: React.DragEvent, targetRouteId: string) => {
+  const handleDrop = async (e: React.DragEvent, targetRouteId: string) => {
     e.preventDefault();
     const stopId = e.dataTransfer.getData('stopId');
     const sourceRouteId = e.dataTransfer.getData('sourceRouteId');
@@ -80,17 +115,33 @@ export default function MapView() {
         return route;
       });
     });
+
+    try {
+      await api.adjustRoute(targetRouteId, {
+        stop_id: stopId,
+        source_route_id: sourceRouteId,
+        target_route_id: targetRouteId,
+        new_sequence_index: 0,
+      });
+    } catch (error) {
+      console.error(error);
+    }
   };
 
-  const handleDispatch = () => {
+  const handleDispatch = async () => {
     setIsDispatching(true);
-    setTimeout(() => {
+    try {
+      await Promise.all(routes.map((route) => api.dispatchRoute(route.id)));
       setIsDispatching(false);
       setDispatched(true);
       setTimeout(() => {
         setShowDispatchModal(false);
       }, 1500);
-    }, 2000);
+    } catch (error) {
+      console.error(error);
+      setIsDispatching(false);
+      window.alert('Dispatch that bai cho mot so route.');
+    }
   };
 
   return (

@@ -1,7 +1,15 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Map, Clock, AlertCircle, CheckCircle2, Navigation, MoreVertical, Truck } from 'lucide-react';
+import api from '../api';
 
 export default function ActiveRoutesView() {
+  const [routes, setRoutes] = useState<any[]>([]);
+
+  useEffect(() => {
+    api.getActiveRoutes()
+      .then(res => setRoutes(res))
+      .catch(console.error);
+  }, []);
   return (
     <div className="flex-1 overflow-y-auto p-8 lg:p-12 bg-background flex flex-col h-full">
       {/* Header */}
@@ -25,49 +33,29 @@ export default function ActiveRoutesView() {
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-bold text-on-surface">Currently Dispatched</h3>
             <div className="flex gap-2">
-              <span className="text-xs font-bold bg-surface-container-high px-3 py-1.5 rounded-lg text-on-surface-variant">3 Active</span>
-              <span className="text-xs font-bold bg-error/10 px-3 py-1.5 rounded-lg text-error">1 Delayed</span>
+              <span className="text-xs font-bold bg-surface-container-high px-3 py-1.5 rounded-lg text-on-surface-variant">{routes.filter(r => r.status && r.status !== 'completed').length} Active</span>
+              <span className="text-xs font-bold bg-error/10 px-3 py-1.5 rounded-lg text-error">{routes.filter(r => r.status === 'delayed').length} Delayed</span>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto pr-2 space-y-4">
-            <ActiveRouteCard 
-              id="VRP-2024-001" 
-              driver="John Doe" 
-              vehicle="TRK-9902" 
-              progress={65} 
-              eta="14:45" 
-              nextStop="City Hospital Pharmacy (Stop 4/12)"
-              status="on-time"
-            />
-            <ActiveRouteCard 
-              id="VRP-2024-002" 
-              driver="Sarah Palmer" 
-              vehicle="VAN-0412" 
-              progress={82} 
-              eta="13:10" 
-              nextStop="Metro Grocers #42 (Stop 8/10)"
-              status="delayed"
-              delay="15 mins"
-            />
-            <ActiveRouteCard 
-              id="VRP-2024-003" 
-              driver="Mike Ross" 
-              vehicle="EV-884" 
-              progress={20} 
-              eta="16:30" 
-              nextStop="Industrial Park B2 (Stop 2/8)"
-              status="on-time"
-            />
-             <ActiveRouteCard 
-              id="VRP-2024-004" 
-              driver="Jessica Pearson" 
-              vehicle="VAN-0922" 
-              progress={100} 
-              eta="Completed" 
-              nextStop="Returned to Depot"
-              status="completed"
-            />
+            {routes.length === 0 ? (
+              <p className="text-on-surface-variant text-sm mt-4">No active routes currently.</p>
+            ) : (
+              routes.map(r => (
+                <ActiveRouteCard 
+                  key={r.route_id}
+                  id={r.route_id} 
+                  driver={r.driver_name} 
+                  vehicle={r.vehicle_id} 
+                  progress={r.progress_percentage} 
+                  eta={r.next_stop?.eta || 'Completed'} 
+                  nextStop={r.next_stop ? `${r.next_stop.name} (Stop ${r.next_stop.stop_index}/${r.next_stop.total_stops})` : 'Returned to Depot'}
+                  status={r.status}
+                  delay={r.delay_mins ? `${r.delay_mins} mins` : undefined}
+                />
+              ))
+            )}
           </div>
         </div>
 

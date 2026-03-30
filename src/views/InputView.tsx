@@ -1,18 +1,154 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Truck, Upload, Plus, MoreVertical, ChevronLeft, ChevronRight, Map, AlertTriangle, Settings2, MessageSquare, Route, X, FileSpreadsheet, MapPin } from 'lucide-react';
+import api from '../api';
 
 export default function InputView() {
   const [showAddPoint, setShowAddPoint] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isSubmittingPoint, setIsSubmittingPoint] = useState(false);
+  const [optimizeMessage, setOptimizeMessage] = useState('');
+  const [manifestFile, setManifestFile] = useState<File | null>(null);
   
-  // Simulated state for Overload Warning
-  const [activeVehicles, setActiveVehicles] = useState(3);
-  const [capacityPerVehicle, setCapacityPerVehicle] = useState(1500);
-  const totalDemand = 5200; // Static mock demand for demonstration
+  const [fleet, setFleet] = useState<any[]>([]);
+  const [locations, setLocations] = useState<any[]>([]);
+  const [pointForm, setPointForm] = useState({
+    id: '',
+    name: '',
+    address: '',
+    demand: 0,
+    service_time: 15,
+    time_window_start: '',
+    time_window_end: '',
+  });
+
+  const loadFleetAndLocations = () => {
+    Promise.all([api.getFleetVehicles(), api.getLocationDemands()])
+      .then(([fleetRes, locationRes]) => {
+        setFleet(fleetRes || []);
+        setLocations(locationRes || []);
+      })
+      .catch(console.error);
+  };
+
+  useEffect(() => {
+    loadFleetAndLocations();
+  }, []);
+
+  const activeVehicles = fleet.length;
+  const totalCapacity = fleet.reduce((sum, v) => sum + (v.capacity_kg || 0), 0);
+  const totalDemand = locations.reduce((sum, loc) => sum + (loc.demand_kg || loc.demand || 0), 0);
   
-  const totalCapacity = activeVehicles * capacityPerVehicle;
-  const isOverloaded = totalDemand > totalCapacity;
-  const utilization = Math.round((totalDemand / totalCapacity) * 100);
+  const isOverloaded = totalCapacity > 0 && totalDemand > totalCapacity;
+  const utilization = totalCapacity > 0 ? Math.round((totalDemand / totalCapacity) * 100) : 0;
+
+  const handleAddPoint = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!pointForm.name.trim()) {
+      window.alert('Vui lòng nhập tên điểm giao.');
+      return;
+    }
+
+    try {
+      setIsSubmittingPoint(true);
+      await api.createLocation({
+        id: pointForm.id || undefined,
+        name: pointForm.name,
+        address_string: pointForm.address,
+        lat: 0,
+        lng: 0,
+        demand_kg: pointForm.demand,
+        time_window_start: pointForm.time_window_start || undefined,
+        time_window_end: pointForm.time_window_end || undefined,
+        service_time_mins: pointForm.service_time,
+      });
+      loadFleetAndLocations();
+      setShowAddPoint(false);
+      setPointForm({
+        id: '',
+        name: '',
+        address: '',
+        demand: 0,
+        service_time: 15,
+        time_window_start: '',
+        time_window_end: '',
+      });
+      window.alert('Đã thêm điểm giao thành công.');
+    } catch (error) {
+      console.error(error);
+      window.alert('Không thể thêm điểm giao.');
+    } finally {
+      setIsSubmittingPoint(false);
+    }
+  };
+
+  const handleUploadManifest = async () => {
+    if (!manifestFile) {
+      window.alert('Vui lòng chọn file CSV/XLSX trước khi upload.');
+      return;
+    }
+
+    try {
+      setIsUploading(true);
+      const res = await api.uploadManifest(manifestFile);
+      loadFleetAndLocations();
+      setShowUpload(false);
+      setManifestFile(null);
+      window.alert(`Upload thành công: ${res.created_locations}/${res.uploaded_rows} điểm mới.`);
+    } catch (error) {
+      console.error(error);
+      window.alert('Upload manifest thất bại.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleOptimize = async () => {
+    if (fleet.length === 0 || locations.length === 0) {
+      setOptimizeMessage('Cần có ít nhất 1 xe và 1 điểm giao để tối ưu.');
+      return;
+    }
+
+    try {
+      setIsOptimizing(true);
+      setOptimizeMessage('Đang gửi yêu cầu tối ưu...');
+
+      const runRes = await api.runOptimizer({
+        project_id: `project-${Date.now()}`,
+        solver_algorithm: 'or-tools',
+        vehicles: fleet.map(v => v.id),
+        locations: locations.map(loc => loc.id),
+        objective: 'minimize_distance',
+        constraints: {
+          strict_time_windows: true,
+          respect_capacity: true,
+        },
+      });
+
+      let completedResult: any = null;
+      for (let i = 0; i < 20; i += 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const job = await api.getOptimizerJob(runRes.job_id);
+        if (job.status === 'completed') {
+          completedResult = job.result;
+          break;
+        }
+      }
+
+      if (completedResult) {
+        const routeCount = completedResult.routes?.length || 0;
+        setOptimizeMessage(`Tối ưu xong: ${routeCount} tuyến, tổng quãng đường ${completedResult.total_distance_km} km.`);
+      } else {
+        setOptimizeMessage('Yêu cầu đã tạo, thuật toán vẫn đang tính.');
+      }
+    } catch (error) {
+      console.error(error);
+      setOptimizeMessage('Chạy tối ưu thất bại.');
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-background relative">
@@ -24,17 +160,26 @@ export default function InputView() {
         </div>
         <div className="flex gap-3">
           <button 
+            onClick={handleOptimize}
             className={`px-6 h-10 rounded-lg text-sm font-bold shadow-sm transition-all ${
               isOverloaded 
                 ? 'bg-surface-container text-on-surface-variant cursor-not-allowed opacity-50' 
                 : 'primary-gradient text-on-primary active:scale-95'
             }`}
-            disabled={isOverloaded}
+            disabled={isOverloaded || isOptimizing}
           >
-            Optimize Route
+            {isOptimizing ? 'Optimizing...' : 'Optimize Route'}
           </button>
         </div>
       </header>
+
+      {optimizeMessage && (
+        <div className="px-10 pt-4">
+          <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low px-4 py-3 text-sm text-on-surface">
+            {optimizeMessage}
+          </div>
+        </div>
+      )}
 
       <main className="flex flex-1 overflow-hidden">
         {/* Left Column: Fleet Configuration */}
@@ -50,22 +195,22 @@ export default function InputView() {
               <div className="relative">
                 <input 
                   type="number" 
+                  readOnly
                   value={activeVehicles}
-                  onChange={(e) => setActiveVehicles(Number(e.target.value) || 0)}
-                  className="w-full h-12 bg-surface-container-lowest border-none rounded-xl px-4 py-2 text-on-surface focus:ring-2 focus:ring-primary-fixed-dim outline-none"
+                  className="w-full h-12 bg-surface-container-lowest border-none rounded-xl px-4 py-2 text-on-surface focus:ring-2 focus:ring-primary-fixed-dim outline-none cursor-not-allowed opacity-80"
                 />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-xs uppercase font-bold">Units</span>
               </div>
             </div>
 
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-semibold text-on-surface-variant">Vehicle Capacity</label>
+              <label className="text-sm font-semibold text-on-surface-variant">Total Fleet Capacity</label>
               <div className="relative">
                 <input 
                   type="number" 
-                  value={capacityPerVehicle}
-                  onChange={(e) => setCapacityPerVehicle(Number(e.target.value) || 0)}
-                  className="w-full h-12 bg-surface-container-lowest border-none rounded-xl px-4 py-2 text-on-surface focus:ring-2 focus:ring-primary-fixed-dim outline-none"
+                  readOnly
+                  value={totalCapacity}
+                  className="w-full h-12 bg-surface-container-lowest border-none rounded-xl px-4 py-2 text-on-surface focus:ring-2 focus:ring-primary-fixed-dim outline-none cursor-not-allowed opacity-80"
                 />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-xs uppercase font-bold">KG</span>
               </div>
@@ -133,10 +278,21 @@ export default function InputView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/10">
-                  <TableRow id="ORD-001" name="Terminal A - Retail" address="Main St. 450, London" demand="450.0" time="09:30 - 15:00" timeStyle="secondary" />
-                  <TableRow id="ORD-002" name="Westside Storage" address="Industrial Park B2, Unit 4" demand="1200.0" time="12:00 - 18:00" timeStyle="tertiary" />
-                  <TableRow id="ORD-003" name="CBD Delivery Point" address="Market Square 12, London" demand="180.5" time="Flexible" timeStyle="primary" />
-                  <TableRow id="ORD-004" name="North Clinic" address="Health Ave 10" demand="3369.5" time="08:00 - 12:00" timeStyle="secondary" />
+                  {locations.length === 0 ? (
+                    <tr><td colSpan={5} className="px-6 py-4 text-center text-sm text-on-surface-variant">No locations found. Add or import points.</td></tr>
+                  ) : (
+                    locations.map((loc, idx) => (
+                      <TableRow 
+                        key={loc.id || idx} 
+                        id={loc.id || `ORD-${idx+1}`} 
+                        name={loc.name} 
+                        address={loc.address_string || loc.address || 'Unknown'} 
+                        demand={loc.demand_kg || loc.demand || 0} 
+                        time={`${loc.time_window_start || 'Flexible'} - ${loc.time_window_end || ''}`} 
+                        timeStyle="primary" 
+                      />
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -184,24 +340,27 @@ export default function InputView() {
               <h3 className="text-xl font-bold text-on-surface font-headline">Add Delivery Point</h3>
               <button onClick={() => setShowAddPoint(false)} className="text-outline hover:text-on-surface p-1 rounded-lg hover:bg-surface-container"><X size={20} /></button>
             </div>
-            <form className="p-6 flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); setShowAddPoint(false); }}>
-              <div><label className="text-xs font-bold text-on-surface-variant uppercase">Order ID</label><input type="text" placeholder="e.g. ORD-1099" required className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+            <form className="p-6 flex flex-col gap-4" onSubmit={handleAddPoint}>
+              <div><label className="text-xs font-bold text-on-surface-variant uppercase">Order ID</label><input type="text" placeholder="e.g. ORD-1099" value={pointForm.id} onChange={e => setPointForm(prev => ({ ...prev, id: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+              <div><label className="text-xs font-bold text-on-surface-variant uppercase">Tên điểm giao</label><input type="text" placeholder="e.g. Metro Grocers #42" required value={pointForm.name} onChange={e => setPointForm(prev => ({ ...prev, name: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
               <div><label className="text-xs font-bold text-on-surface-variant uppercase">Address or Coordinates</label>
                 <div className="relative">
-                  <input type="text" placeholder="e.g. 10 Downing St, London" required className="mt-1 w-full h-10 bg-surface-container-low rounded-lg pl-3 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                  <input type="text" placeholder="e.g. 10 Downing St, London" required value={pointForm.address} onChange={e => setPointForm(prev => ({ ...prev, address: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg pl-3 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                   <MapPin size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-outline" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Demand / Weight (kg)</label><input type="number" step="0.1" required className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Service Time (mins)</label><input type="number" defaultValue="15" className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Demand / Weight (kg)</label><input type="number" step="0.1" required value={pointForm.demand} onChange={e => setPointForm(prev => ({ ...prev, demand: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Service Time (mins)</label><input type="number" value={pointForm.service_time} onChange={e => setPointForm(prev => ({ ...prev, service_time: Number(e.target.value) }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Time Window Start</label><input type="time" className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
-                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Time Window End</label><input type="time" className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Time Window Start</label><input type="time" value={pointForm.time_window_start} onChange={e => setPointForm(prev => ({ ...prev, time_window_start: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+                <div><label className="text-xs font-bold text-on-surface-variant uppercase">Time Window End</label><input type="time" value={pointForm.time_window_end} onChange={e => setPointForm(prev => ({ ...prev, time_window_end: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
               </div>
               
-              <button type="submit" className="mt-4 primary-gradient text-on-primary h-12 rounded-xl font-bold text-sm shadow-md">Add Point to Route</button>
+              <button type="submit" disabled={isSubmittingPoint} className="mt-4 primary-gradient text-on-primary h-12 rounded-xl font-bold text-sm shadow-md disabled:opacity-60">
+                {isSubmittingPoint ? 'Saving...' : 'Add Point to Route'}
+              </button>
             </form>
           </div>
         </div>
@@ -219,10 +378,19 @@ export default function InputView() {
                <Upload size={24} className="mx-auto text-outline group-hover:text-primary transition-colors mb-2" />
                <p className="text-sm font-bold text-on-surface">Click to browse or drag & drop</p>
                <p className="text-xs text-on-surface-variant mt-1">.xlsx, .csv (Max 10MB)</p>
+               <input
+                 type="file"
+                 accept=".csv,.xlsx,.xls"
+                 className="mt-4 w-full text-xs"
+                 onChange={e => setManifestFile(e.target.files?.[0] || null)}
+               />
+               {manifestFile && <p className="text-xs mt-2 text-primary">Selected: {manifestFile.name}</p>}
              </div>
              <div className="flex gap-3 w-full">
                <button onClick={() => setShowUpload(false)} className="flex-1 h-12 rounded-xl bg-surface-container hover:bg-surface-container-high transition-colors font-bold text-sm text-on-surface">Cancel</button>
-               <button onClick={() => setShowUpload(false)} className="flex-1 h-12 rounded-xl primary-gradient text-on-primary font-bold text-sm shadow-md">Upload Data</button>
+               <button disabled={isUploading} onClick={handleUploadManifest} className="flex-1 h-12 rounded-xl primary-gradient text-on-primary font-bold text-sm shadow-md disabled:opacity-60">
+                 {isUploading ? 'Uploading...' : 'Upload Data'}
+               </button>
              </div>
           </div>
         </div>
