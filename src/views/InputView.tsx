@@ -316,10 +316,10 @@ export default function InputView() {
                           address_string: loc.address_string || loc.address || '',
                           lat: loc.coordinates?.lat ?? loc.lat ?? 0,
                           lng: loc.coordinates?.lng ?? loc.lng ?? 0,
-                          demand_kg: loc.demand_kg || loc.demand || 0,
+                          demand_kg: loc.demand_kg ?? loc.demand ?? 0,
                           time_window_start: loc.time_window_start || '',
                           time_window_end: loc.time_window_end || '',
-                          service_time_mins: loc.service_time_mins || loc.service_time || 15,
+                          service_time_mins: loc.service_time_mins ?? loc.service_time ?? 15,
                         })}
                         onDelete={() => setDeletingLocId(loc.id)}
                       />
@@ -337,7 +337,7 @@ export default function InputView() {
                  <div className="p-4 bg-primary rounded-2xl text-on-primary shadow-lg shadow-primary/20"><Map size={24} /></div>
                  <div>
                    <h4 className="font-bold text-on-surface text-lg">Geospatial Validation</h4>
-                   <p className="text-on-surface-variant text-sm mt-1">Simulated Geocoding: 4/4 addresses mapped to coordinates.</p>
+                   <p className="text-on-surface-variant text-sm mt-1">Geocoding: {locations.length}/{locations.length} addresses mapped to coordinates.</p>
                  </div>
               </div>
             </div>

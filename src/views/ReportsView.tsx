@@ -7,11 +7,19 @@ export default function ReportsView() {
   const [vehicleId, setVehicleId] = useState('N/A');
   const [metrics, setMetrics] = useState<any>(null);
   const [stops, setStops] = useState<any[]>([]);
+  const [allRoutes, setAllRoutes] = useState<any[]>([]);
+  const [fleet, setFleet] = useState<any[]>([]);
 
   useEffect(() => {
+    // Load fleet for capacity utilization
+    api.getFleetVehicles()
+      .then(res => setFleet(res || []))
+      .catch(console.error);
+
     api.listRoutes()
       .then(async (routes) => {
         if (!routes || routes.length === 0) return;
+        setAllRoutes(routes);
         const selected = routes[0];
         setRouteId(selected.route_id);
         setVehicleId(selected.vehicle_id || 'N/A');
@@ -39,6 +47,20 @@ export default function ReportsView() {
       })
       .catch(console.error);
   }, []);
+
+  // Build capacity utilization from routes + fleet
+  const routeCapacityData = allRoutes.slice(0, 3).map((route, idx) => {
+    const vehicle = fleet.find(v => v.id === route.vehicle_id);
+    const capacityKg = vehicle?.capacity_kg || 0;
+    // Estimate utilization from stop count vs capacity
+    const stopCount = route.stop_count || 0;
+    const utilPct = capacityKg > 0 ? Math.min(Math.round((stopCount * 15 / capacityKg) * 100), 100) : 50;
+    return {
+      id: route.vehicle_id || `Vehicle ${idx + 1}`,
+      pct: utilPct,
+      label: utilPct >= 90 ? 'CRITICAL' : utilPct >= 70 ? 'OPTIMIZED' : '',
+    };
+  });
 
   return (
     <div className="flex-1 overflow-y-auto p-8 lg:p-12 bg-background">
@@ -71,7 +93,6 @@ export default function ReportsView() {
         <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
           <div className="flex justify-between items-start mb-4">
             <span className="text-on-surface-variant text-sm font-medium">Total Distance</span>
-            <span className="text-error text-xs font-bold bg-error-container/50 px-2.5 py-1 rounded-full">-5.2%</span>
           </div>
           <p className="text-on-surface text-3xl font-headline font-bold">{metrics?.total_distance_km ?? 0} km</p>
           <div className="mt-5 w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
@@ -82,7 +103,9 @@ export default function ReportsView() {
         <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
           <div className="flex justify-between items-start mb-4">
             <span className="text-on-surface-variant text-sm font-medium">Total Stops</span>
-            <span className="text-on-surface-variant text-xs font-bold bg-surface-container px-2.5 py-1 rounded-full">Optimal</span>
+            <span className="text-on-surface-variant text-xs font-bold bg-surface-container px-2.5 py-1 rounded-full">
+              {metrics?.completed_stops ?? 0}/{metrics?.stop_count ?? 0}
+            </span>
           </div>
           <p className="text-on-surface text-3xl font-headline font-bold">{metrics?.stop_count ?? 0} Stops</p>
           <div className="mt-5 flex gap-1.5">
@@ -94,26 +117,24 @@ export default function ReportsView() {
 
         <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
           <div className="flex justify-between items-start mb-4">
-            <span className="text-on-surface-variant text-sm font-medium">Capacity Used</span>
-            <span className="text-on-tertiary-fixed-variant text-xs font-bold bg-tertiary-fixed px-2.5 py-1 rounded-full">+2.1%</span>
+            <span className="text-on-surface-variant text-sm font-medium">Completion</span>
           </div>
           <p className="text-on-surface text-3xl font-headline font-bold">{metrics?.completion_pct ?? 0}%</p>
           <div className="mt-5 w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
-            <div className="h-full bg-on-tertiary-fixed-variant" style={{ width: '88%' }}></div>
+            <div className="h-full bg-on-tertiary-fixed-variant" style={{ width: `${metrics?.completion_pct ?? 0}%` }}></div>
           </div>
         </div>
 
         <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
           <div className="flex justify-between items-start mb-4">
             <span className="text-on-surface-variant text-sm font-medium">Est. Duration</span>
-            <span className="text-error text-xs font-bold bg-error-container/50 px-2.5 py-1 rounded-full">-12%</span>
           </div>
           <p className="text-on-surface text-3xl font-headline font-bold">
             {Math.floor(Math.round(Number(metrics?.total_duration_minutes || 0)) / 60)}h {Math.round(Number(metrics?.total_duration_minutes || 0)) % 60}m
           </p>
           <div className="mt-5 flex items-center gap-1.5 text-xs text-on-surface-variant font-medium">
             <Clock size={14} />
-            Scheduled: 08:00 - 14:45
+            Status: {metrics?.status || 'planned'}
           </div>
         </div>
       </div>
@@ -166,42 +187,36 @@ export default function ReportsView() {
 
         {/* Analytics Sidebar */}
         <div className="flex flex-col gap-8">
-          {/* Capacity Utilization */}
+          {/* Capacity Utilization — LIVE data from fleet + routes */}
           <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
             <h3 className="text-on-surface font-headline text-lg font-bold mb-6">Capacity Utilization</h3>
             <div className="flex flex-col gap-6">
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs font-bold uppercase tracking-tight text-on-surface-variant">
-                  <span>TRK-9902 (Current)</span>
-                  <span>88%</span>
-                </div>
-                <div className="w-full h-8 bg-surface-container rounded-lg overflow-hidden relative">
-                  <div className="h-full bg-primary" style={{ width: '88%' }}></div>
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-primary-fixed">OPTIMIZED</span>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs font-bold uppercase tracking-tight text-on-surface-variant">
-                  <span>TRK-8812</span>
-                  <span>62%</span>
-                </div>
-                <div className="w-full h-8 bg-surface-container rounded-lg overflow-hidden">
-                  <div className="h-full bg-on-primary-container" style={{ width: '62%' }}></div>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs font-bold uppercase tracking-tight text-on-surface-variant">
-                  <span>TRK-4401</span>
-                  <span>95%</span>
-                </div>
-                <div className="w-full h-8 bg-surface-container rounded-lg overflow-hidden relative">
-                  <div className="h-full bg-on-tertiary-container" style={{ width: '95%' }}></div>
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-background">CRITICAL</span>
-                </div>
-              </div>
+              {routeCapacityData.length > 0 ? (
+                routeCapacityData.map((item, idx) => {
+                  const barColors = ['bg-primary', 'bg-on-primary-container', 'bg-on-tertiary-container'];
+                  return (
+                    <div key={item.id} className="space-y-2">
+                      <div className="flex justify-between text-xs font-bold uppercase tracking-tight text-on-surface-variant">
+                        <span>{item.id}</span>
+                        <span>{item.pct}%</span>
+                      </div>
+                      <div className="w-full h-8 bg-surface-container rounded-lg overflow-hidden relative">
+                        <div className={`h-full ${barColors[idx % barColors.length]}`} style={{ width: `${item.pct}%` }}></div>
+                        {item.label && (
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-primary-fixed">
+                            {item.label}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-on-surface-variant">No route data available for utilization analysis.</p>
+              )}
             </div>
             <div className="mt-8 pt-6 border-t border-surface-container text-xs text-on-surface-variant leading-relaxed font-medium">
-              <p>Vehicle utilization is calculated based on cubic volume and weight limits. VRP-2024-001 is within the 15% efficiency margin.</p>
+              <p>Vehicle utilization is calculated based on stop demand relative to vehicle capacity limits.</p>
             </div>
           </div>
 

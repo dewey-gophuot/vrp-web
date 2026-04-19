@@ -4,12 +4,25 @@ import api from '../api';
 
 export default function DashboardView() {
   const [metrics, setMetrics] = useState<any>(null);
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [fleet, setFleet] = useState<any[]>([]);
 
   useEffect(() => {
     api.getDashboardMetrics()
       .then(res => setMetrics(res))
       .catch(console.error);
+
+    api.listOptimizerJobs()
+      .then(res => setJobs(res || []))
+      .catch(console.error);
+
+    api.getFleetVehicles()
+      .then(res => setFleet(res || []))
+      .catch(console.error);
   }, []);
+
+  const vehiclesOnRoute = metrics?.vehicles_in_use ?? 0;
+  const vehiclesIdle = (fleet.length || 0) - vehiclesOnRoute;
 
   return (
     <div className="flex-1 overflow-y-auto bg-surface p-8">
@@ -40,37 +53,49 @@ export default function DashboardView() {
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
         <MetricCard icon={Route} title="Total Active Routes" value={metrics?.total_active_routes?.toLocaleString() || "---"} trend="+5%" trendType="positive" />
-        <MetricCard icon={Truck} title="Vehicle Utilization" value={metrics ? `${metrics.vehicle_utilization_pct}%` : "---"} trend="-2%" trendType="negative" />
+        <MetricCard icon={Truck} title="Vehicle Utilization" value={metrics ? `${metrics.vehicle_utilization_pct}%` : "---"} trend={metrics?.vehicle_utilization_pct > 70 ? "+OK" : "Low"} trendType={metrics?.vehicle_utilization_pct > 70 ? "positive" : "negative"} />
         <MetricCard icon={MapPin} title="Total Distance" value={metrics?.total_distance_km?.toLocaleString() || "---"} unit="km" trend="+12%" trendType="positive" />
         <MetricCard icon={DollarSign} title="Cost Savings" value={metrics ? `$${metrics.cost_savings_usd?.toLocaleString() || 0}` : "---"} trend="+18%" trendType="positive" />
       </div>
 
       {/* Optimization Performance & Projects */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Projects Table */}
+        {/* Projects Table — LIVE from optimization jobs */}
         <div className="lg:col-span-2 bg-surface-container-lowest rounded-2xl ghost-shadow overflow-hidden">
           <div className="p-6 flex justify-between items-center">
-            <h3 className="text-lg font-headline font-bold text-on-surface">Optimization Projects</h3>
-            <button className="text-sm font-bold text-primary px-4 py-2 rounded-lg bg-primary-fixed hover:bg-primary-fixed-dim transition-colors">
-              New Project
-            </button>
+            <h3 className="text-lg font-headline font-bold text-on-surface">Optimization Jobs</h3>
+            <span className="text-sm font-bold text-on-surface-variant bg-surface-container-high px-4 py-2 rounded-lg">
+              {jobs.length} Total
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-surface-container-low/50">
-                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-wider">Project Name</th>
-                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-wider">Fleet Size</th>
-                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-wider">Created</th>
+                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-wider">Job ID</th>
                   <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-wider text-right">Actions</th>
+                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-wider">Created</th>
+                  <th className="px-6 py-4 text-xs font-bold text-on-surface-variant uppercase tracking-wider">Est. Time</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/10">
-                <ProjectRow name="North Region Delivery Q4" updated="2h ago" fleet="42" date="Oct 12, 2023" status="Optimized" />
-                <ProjectRow name="Inter-City Logistics Hub" updated="15m ago" fleet="15" date="Oct 24, 2023" status="Calculating" />
-                <ProjectRow name="Warehouse B - Direct-to-Store" updated="2 days ago" fleet="8" date="Oct 22, 2023" status="Draft" />
-                <ProjectRow name="East Coast Express Route" updated="5h ago" fleet="112" date="Oct 20, 2023" status="Optimized" />
+                {jobs.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-6 py-8 text-sm text-on-surface-variant text-center">
+                      No optimization jobs yet. Go to Input to run the optimizer.
+                    </td>
+                  </tr>
+                ) : (
+                  jobs.slice(0, 6).map(job => (
+                    <JobRow
+                      key={job.job_id}
+                      jobId={job.job_id}
+                      status={job.status}
+                      createdAt={job.created_at}
+                      estimatedTime={job.estimated_time_seconds}
+                    />
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -84,8 +109,10 @@ export default function DashboardView() {
           </div>
           <div className="flex flex-col gap-6">
             <div className="flex items-baseline gap-2">
-              <span className="text-4xl font-headline font-bold text-on-surface tracking-tight">92%</span>
-              <span className="text-sm font-bold text-on-tertiary-container">+3.4%</span>
+              <span className="text-4xl font-headline font-bold text-on-surface tracking-tight">
+                {metrics?.vehicle_utilization_pct ?? 0}%
+              </span>
+              <span className="text-sm font-bold text-on-tertiary-container">utilization</span>
             </div>
             <div className="h-48 w-full">
               <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 400 150">
@@ -118,7 +145,7 @@ export default function DashboardView() {
             className="w-full h-full object-cover grayscale opacity-60 mix-blend-multiply"
           />
           
-          {/* Map Overlays */}
+          {/* Map Overlays — LIVE data */}
           <div className="absolute top-6 left-6 p-5 glass-panel rounded-xl w-72">
             <div className="flex items-center gap-3 mb-5">
               <span className="w-3 h-3 rounded-full bg-tertiary-fixed-dim"></span>
@@ -128,19 +155,19 @@ export default function DashboardView() {
               <div>
                 <div className="flex justify-between items-center text-xs mb-2">
                   <span className="text-on-surface-variant font-medium">On-Route</span>
-                  <span className="font-bold text-on-surface">84 Vehicles</span>
+                  <span className="font-bold text-on-surface">{vehiclesOnRoute} Vehicle{vehiclesOnRoute !== 1 ? 's' : ''}</span>
                 </div>
                 <div className="w-full bg-surface-container rounded-full h-1.5">
-                  <div className="bg-primary h-1.5 rounded-full" style={{ width: '75%' }}></div>
+                  <div className="bg-primary h-1.5 rounded-full" style={{ width: `${fleet.length > 0 ? Math.round((vehiclesOnRoute / fleet.length) * 100) : 0}%` }}></div>
                 </div>
               </div>
               <div>
                 <div className="flex justify-between items-center text-xs mb-2">
                   <span className="text-on-surface-variant font-medium">Idle/Depot</span>
-                  <span className="font-bold text-on-surface">12 Vehicles</span>
+                  <span className="font-bold text-on-surface">{Math.max(0, vehiclesIdle)} Vehicle{vehiclesIdle !== 1 ? 's' : ''}</span>
                 </div>
                 <div className="w-full bg-surface-container rounded-full h-1.5">
-                  <div className="bg-secondary-fixed-dim h-1.5 rounded-full" style={{ width: '25%' }}></div>
+                  <div className="bg-secondary-fixed-dim h-1.5 rounded-full" style={{ width: `${fleet.length > 0 ? Math.round((Math.max(0, vehiclesIdle) / fleet.length) * 100) : 0}%` }}></div>
                 </div>
               </div>
             </div>
@@ -187,35 +214,51 @@ function MetricCard({ icon: Icon, title, value, unit, trend, trendType }: any) {
   );
 }
 
-function ProjectRow({ name, updated, fleet, date, status }: any) {
-  const getStatusStyle = (status: string) => {
-    switch (status) {
-      case 'Optimized': return 'bg-tertiary-fixed text-on-tertiary-fixed-variant';
-      case 'Calculating': return 'bg-secondary-container text-on-secondary-container';
+function JobRow({ jobId, status, createdAt, estimatedTime }: any) {
+  const getStatusStyle = (s: string) => {
+    switch (s) {
+      case 'completed': return 'bg-tertiary-fixed text-on-tertiary-fixed-variant';
+      case 'calculating': return 'bg-secondary-container text-on-secondary-container';
+      case 'failed': return 'bg-error-container text-error';
+      case 'cancelled': return 'bg-surface-variant text-on-surface-variant';
       default: return 'bg-surface-variant text-on-surface-variant';
     }
+  };
+
+  const formatDate = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch { return iso; }
+  };
+
+  const timeSince = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      const diff = Date.now() - d.getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 60) return `${mins}m ago`;
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return `${hrs}h ago`;
+      return `${Math.floor(hrs / 24)}d ago`;
+    } catch { return ''; }
   };
 
   return (
     <tr className="hover:bg-surface-container-low transition-colors group">
       <td className="px-6 py-5">
         <div className="flex flex-col">
-          <span className="font-bold text-on-surface text-sm">{name}</span>
-          <span className="text-xs text-on-surface-variant mt-0.5">Last updated {updated}</span>
+          <span className="font-bold text-on-surface text-sm font-mono">{jobId}</span>
+          <span className="text-xs text-on-surface-variant mt-0.5">{timeSince(createdAt)}</span>
         </div>
       </td>
-      <td className="px-6 py-5 text-sm font-mono text-on-surface">{fleet} Vehicles</td>
-      <td className="px-6 py-5 text-sm text-on-surface-variant">{date}</td>
       <td className="px-6 py-5">
-        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${getStatusStyle(status)}`}>
+        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold capitalize ${getStatusStyle(status)}`}>
           {status}
         </span>
       </td>
-      <td className="px-6 py-5 text-right">
-        <button className="text-outline hover:text-primary transition-colors p-2 rounded-lg hover:bg-surface-container">
-          <MoreVertical size={18} />
-        </button>
-      </td>
+      <td className="px-6 py-5 text-sm text-on-surface-variant">{formatDate(createdAt)}</td>
+      <td className="px-6 py-5 text-sm font-mono text-on-surface-variant">{estimatedTime ? `${estimatedTime.toFixed(1)}s` : '-'}</td>
     </tr>
   );
 }
