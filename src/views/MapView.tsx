@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Search, Bell, Settings, Plus, Minus, Locate, Layers, Info, RefreshCw, Truck, Zap, GripVertical, CheckCircle2, X, Trash2, ChevronDown, AlertCircle, Clock } from 'lucide-react';
+import { Search, Bell, Settings, Info, RefreshCw, Truck, Zap, GripVertical, CheckCircle2, X, Trash2, ChevronDown, AlertCircle, Clock } from 'lucide-react';
 import api from '../api';
+import ProviderMap from '../components/ProviderMap';
+import { mapProvider, type MapMarker } from '../api/mapProvider';
 
 export default function MapView() {
   const [routes, setRoutes] = useState<any[]>([]);
@@ -37,6 +39,8 @@ export default function MapView() {
           name: stop.name || 'Stop',
           address: stop.address || 'N/A',
           demand: stop.status || 'pending',
+          lat: stop.lat ?? stop.coordinates?.lat,
+          lng: stop.lng ?? stop.coordinates?.lng,
         }));
 
         return {
@@ -178,6 +182,25 @@ export default function MapView() {
     }
   };
 
+  const mapMarkers: MapMarker[] = routes.flatMap(route =>
+    route.stops
+      .filter((stop: any) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng)))
+      .map((stop: any) => ({
+        id: `${route.id}-${stop.id}`,
+        lat: Number(stop.lat),
+        lng: Number(stop.lng),
+        label: stop.name,
+        color: route.color,
+      })),
+  );
+
+  const mapCenter = mapMarkers.length > 0
+    ? {
+        lat: mapMarkers.reduce((sum, marker) => sum + marker.lat, 0) / mapMarkers.length,
+        lng: mapMarkers.reduce((sum, marker) => sum + marker.lng, 0) / mapMarkers.length,
+      }
+    : mapProvider.defaultCenter;
+
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-background">
       {/* Header */}
@@ -209,25 +232,9 @@ export default function MapView() {
       </header>
 
       <main className="flex flex-1 overflow-hidden relative">
-        {/* Map Area */}
         <div className="flex-1 relative bg-surface-container-high overflow-hidden">
-          <img
-            src="https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=2000"
-            alt="Map Background"
-            className="absolute inset-0 w-full h-full object-cover opacity-50 mix-blend-multiply"
-          />
+          <ProviderMap className="absolute inset-0 h-full w-full" center={mapCenter} markers={mapMarkers} />
 
-          <div className="absolute left-8 top-8 flex flex-col gap-3 z-10">
-            <div className="flex flex-col rounded-2xl glass-panel p-1.5">
-              <button className="p-2.5 hover:bg-surface-container rounded-xl text-on-surface transition-colors"><Plus size={20} /></button>
-              <div className="h-px bg-outline-variant/20 mx-3 my-1"></div>
-              <button className="p-2.5 hover:bg-surface-container rounded-xl text-on-surface transition-colors"><Minus size={20} /></button>
-            </div>
-            <button className="w-12 h-12 flex items-center justify-center rounded-2xl glass-panel text-on-surface hover:bg-surface-container transition-colors"><Locate size={20} /></button>
-            <button className="w-12 h-12 flex items-center justify-center rounded-2xl glass-panel text-on-surface hover:bg-surface-container transition-colors"><Layers size={20} /></button>
-          </div>
-
-          {/* Route chips */}
           <div className="absolute top-8 right-8 z-10 flex flex-wrap gap-3 max-w-sm justify-end">
             {routes.slice(0, 4).map((r, i) => (
               <div key={r.id} className="flex items-center gap-3 px-5 py-3 rounded-full bg-surface-container-lowest ghost-shadow border border-primary/5">

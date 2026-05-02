@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Shield, Users, Truck, Key, Search, Plus, Edit2, Trash2, Mail, CheckCircle2, MapPin, X, Eye, Zap } from 'lucide-react';
+import { Shield, Users, Truck, Key, Search, Plus, Edit2, Trash2, Mail, CheckCircle2, MapPin, X, Eye, Zap, Calendar } from 'lucide-react';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 import api from '../api';
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
@@ -8,6 +10,23 @@ function inputCls(extra = '') {
   return `mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 border border-outline-variant/10 text-on-surface ${extra}`;
 }
 function labelCls() { return 'text-xs font-bold text-on-surface-variant uppercase tracking-wide'; }
+
+// Generate ID: 3 letters + 3 numbers (e.g. ABC-123)
+function generateId(): string {
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const numbers = '0123456789';
+  
+  let result = '';
+  for (let i = 0; i < 3; i++) {
+    result += letters.charAt(Math.floor(Math.random() * letters.length));
+  }
+  result += '-';
+  for (let i = 0; i < 3; i++) {
+    result += numbers.charAt(Math.floor(Math.random() * numbers.length));
+  }
+  
+  return result;
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><label className={labelCls()}>{label}</label>{children}</div>;
@@ -55,38 +74,38 @@ function TabButton({ active, onClick, icon: Icon, label }: any) {
 
 // ─── Main View ────────────────────────────────────────────────────────────────
 
-type ModalType = { type: 'create-user' | 'edit-user' | 'create-vehicle' | 'edit-vehicle' | 'create-depot' | 'edit-depot'; data?: any } | null;
-type DeleteState = { entity: 'user' | 'vehicle' | 'depot'; id: string; name: string } | null;
+type ModalType = { type: 'create-driver' | 'edit-driver' | 'create-vehicle' | 'edit-vehicle' | 'create-depot' | 'edit-depot'; data?: any } | null;
+type DeleteState = { entity: 'driver' | 'vehicle' | 'depot'; id: string; name: string } | null;
 
 export default function AdminView() {
-  const [activeTab, setActiveTab] = useState('users');
+  const [activeTab, setActiveTab] = useState('drivers');
   const [modal, setModal] = useState<ModalType>(null);
   const [deleteState, setDeleteState] = useState<DeleteState>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [fleetData, setFleetData] = useState<any[]>([]);
-  const [usersData, setUsersData] = useState<any[]>([]);
+  const [driversData, setDriversData] = useState<any[]>([]);
   const [depotsData, setDepotsData] = useState<any[]>([]);
 
   const loadFleet = () => api.getFleetVehicles().then(setFleetData).catch(console.error);
-  const loadUsers = () => api.listUsers().then(setUsersData).catch(console.error);
+  const loadDrivers = () => api.listDrivers().then(setDriversData).catch(console.error);
   const loadDepots = () => api.listDepots().then(setDepotsData).catch(console.error);
 
-  useEffect(() => { loadFleet(); loadUsers(); loadDepots(); }, []);
+  useEffect(() => { loadFleet(); loadDrivers(); loadDepots(); }, []);
 
   const handleDelete = async () => {
     if (!deleteState) return;
     setIsDeleting(true);
     try {
       if (deleteState.entity === 'vehicle') { await api.deleteFleetVehicle(deleteState.id); loadFleet(); }
-      if (deleteState.entity === 'user') { await api.deleteUser(deleteState.id); loadUsers(); }
+      if (deleteState.entity === 'driver') { await api.deleteDriver(deleteState.id); loadDrivers(); }
       if (deleteState.entity === 'depot') { await api.deleteDepot(deleteState.id); loadDepots(); }
       setDeleteState(null);
     } catch (e) { console.error(e); window.alert('Xóa thất bại.'); }
     finally { setIsDeleting(false); }
   };
 
-  const addLabel = activeTab === 'users' ? 'Add User/Driver' : activeTab === 'fleet' ? 'Add Vehicle' : activeTab === 'depots' ? 'Add Depot' : 'Add Key';
-  const addModal: ModalType = activeTab === 'users' ? { type: 'create-user' } : activeTab === 'fleet' ? { type: 'create-vehicle' } : activeTab === 'depots' ? { type: 'create-depot' } : null;
+  const addLabel = activeTab === 'drivers' ? 'Add Driver' : activeTab === 'fleet' ? 'Add Vehicle' : activeTab === 'depots' ? 'Add Depot' : 'Add Key';
+  const addModal: ModalType = activeTab === 'drivers' ? { type: 'create-driver' } : activeTab === 'fleet' ? { type: 'create-vehicle' } : activeTab === 'depots' ? { type: 'create-depot' } : null;
 
   return (
     <div className="flex-1 overflow-y-auto p-8 lg:p-12 bg-background flex flex-col h-full relative">
@@ -103,7 +122,7 @@ export default function AdminView() {
       </div>
 
       <div className="flex items-center gap-2 mb-8 border-b border-outline-variant/20 shrink-0">
-        <TabButton active={activeTab === 'users'} onClick={() => setActiveTab('users')} icon={Users} label="Users & Drivers" />
+        <TabButton active={activeTab === 'drivers'} onClick={() => setActiveTab('drivers')} icon={Users} label="Drivers" />
         <TabButton active={activeTab === 'fleet'} onClick={() => setActiveTab('fleet')} icon={Truck} label="Fleet Database" />
         <TabButton active={activeTab === 'depots'} onClick={() => setActiveTab('depots')} icon={MapPin} label="Depots & Hubs" />
         <TabButton active={activeTab === 'api'} onClick={() => setActiveTab('api')} icon={Key} label="API Keys" />
@@ -117,11 +136,11 @@ export default function AdminView() {
           </div>
         </div>
         <div className="flex-1 overflow-auto">
-          {activeTab === 'users' && (
-            <UsersTable
-              usersData={usersData}
-              onEdit={(u) => setModal({ type: 'edit-user', data: u })}
-              onDelete={(u) => setDeleteState({ entity: 'user', id: u.id, name: u.full_name || u.email })}
+          {activeTab === 'drivers' && (
+            <DriversTable
+              driversData={driversData}
+              onEdit={(d) => setModal({ type: 'edit-driver', data: d })}
+              onDelete={(d) => setDeleteState({ entity: 'driver', id: d.id, name: d.full_name || d.email })}
             />
           )}
           {activeTab === 'fleet' && (
@@ -143,8 +162,8 @@ export default function AdminView() {
       </div>
 
       {/* Modals */}
-      {modal?.type === 'create-user' && <ModalWrap title="Add User / Driver" onClose={() => setModal(null)}><UserForm onClose={() => setModal(null)} onCreated={loadUsers} /></ModalWrap>}
-      {modal?.type === 'edit-user' && <ModalWrap title="Edit User" onClose={() => setModal(null)}><UserForm initial={modal.data} onClose={() => setModal(null)} onCreated={loadUsers} /></ModalWrap>}
+      {modal?.type === 'create-driver' && <ModalWrap title="Add Driver" onClose={() => setModal(null)}><DriverForm onClose={() => setModal(null)} onCreated={loadDrivers} /></ModalWrap>}
+      {modal?.type === 'edit-driver' && <ModalWrap title="Edit Driver" onClose={() => setModal(null)}><DriverForm initial={modal.data} onClose={() => setModal(null)} onCreated={loadDrivers} /></ModalWrap>}
       {modal?.type === 'create-vehicle' && <ModalWrap title="Add Vehicle" onClose={() => setModal(null)}><FleetForm onClose={() => setModal(null)} onCreated={loadFleet} /></ModalWrap>}
       {modal?.type === 'edit-vehicle' && <ModalWrap title="Edit Vehicle" onClose={() => setModal(null)}><FleetForm initial={modal.data} onClose={() => setModal(null)} onCreated={loadFleet} /></ModalWrap>}
       {modal?.type === 'create-depot' && <ModalWrap title="Add Depot" onClose={() => setModal(null)}><DepotForm onClose={() => setModal(null)} onCreated={loadDepots} /></ModalWrap>}
@@ -163,45 +182,99 @@ export default function AdminView() {
   );
 }
 
-// ─── User Form (Create + Edit) ────────────────────────────────────────────────
+// ─── Driver Form (Create + Edit) ────────────────────────────────────────────────
 
-function UserForm({ initial, onClose, onCreated }: { initial?: any; onClose: () => void; onCreated: () => void }) {
+function DriverForm({ initial, onClose, onCreated }: { initial?: any; onClose: () => void; onCreated: () => void }) {
   const [form, setForm] = useState({
     full_name: initial?.full_name || '',
     email: initial?.email || '',
-    role: initial?.role || 'Driver',
     phone: initial?.phone || '',
+    license_number: initial?.license_number || '',
+    license_expiry: initial?.license_expiry || '',
+    vehicle_id: initial?.vehicle_id || '',
+    depot_id: initial?.depot_id || '',
+    status: initial?.status || 'active',
   });
   const [saving, setSaving] = useState(false);
+  const [depots, setDepots] = useState<any[]>([]);
   const isEdit = !!initial;
+
+  useEffect(() => {
+    api.listDepots().then(setDepots).catch(console.error);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
       if (isEdit) {
-        await api.updateUser(initial.id, form);
+        const data = {
+          full_name: form.full_name,
+          email: form.email || null,
+          phone: form.phone || null,
+          license_number: form.license_number || null,
+          license_expiry: form.license_expiry || null,
+          vehicle_id: form.vehicle_id || null,
+          status: form.status,
+        };
+        await api.updateDriver(initial.id, data);
       } else {
-        await api.createUser(form);
+        const data = {
+          full_name: form.full_name,
+          email: form.email || null,
+          phone: form.phone || null,
+          license_number: form.license_number || null,
+          license_expiry: form.license_expiry || null,
+          vehicle_id: form.vehicle_id || null,
+          depot_id: form.depot_id,
+        };
+        await api.createDriver(data);
       }
       onCreated();
       onClose();
-    } catch (err) { console.error(err); window.alert(isEdit ? 'Cập nhật thất bại.' : 'Tạo user thất bại.'); }
+    } catch (err) { console.error(err); window.alert(isEdit ? 'Cập nhật thất bại.' : 'Tạo driver thất bại.'); }
     finally { setSaving(false); }
   };
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
       <Field label="Full Name"><input className={inputCls()} required value={form.full_name} onChange={e => setForm(p => ({ ...p, full_name: e.target.value }))} /></Field>
-      <Field label="Email"><input type="email" className={inputCls()} required value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} /></Field>
-      <Field label="Role">
-        <select className={inputCls()} value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
-          <option>Driver</option><option>Dispatcher</option><option>System Admin</option>
-        </select>
-      </Field>
+      <Field label="Email"><input type="email" className={inputCls()} value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} /></Field>
       <Field label="Phone"><input className={inputCls()} value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} /></Field>
+      {!isEdit && (
+        <Field label="Depot">
+          <select className={inputCls()} value={form.depot_id} onChange={e => setForm(p => ({ ...p, depot_id: e.target.value }))}>
+            <option value="">Select Depot...</option>
+            {depots.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        </Field>
+      )}
+      <Field label="License Number"><input className={inputCls()} value={form.license_number} onChange={e => setForm(p => ({ ...p, license_number: e.target.value }))} placeholder="e.g. 79L1-12345" /></Field>
+      <Field label="License Expiry">
+        <div className="relative">
+          <DatePicker
+            selected={form.license_expiry ? new Date(form.license_expiry) : null}
+            onChange={(date) => setForm(p => ({ ...p, license_expiry: date ? date.toISOString().split('T')[0] : '' }))}
+            dateFormat="dd/MM/yyyy"
+            placeholderText="Select date"
+            className={`${inputCls()} pr-10`}
+            wrapperClassName="w-full"
+          />
+          <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-outline w-4 h-4 pointer-events-none" />
+        </div>
+      </Field>
+      <Field label="Assigned Vehicle ID"><input className={inputCls()} value={form.vehicle_id} onChange={e => setForm(p => ({ ...p, vehicle_id: e.target.value }))} placeholder="e.g. TRK-001" /></Field>
+      {isEdit && (
+        <Field label="Status">
+          <select className={inputCls()} value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value }))}>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="suspended">Suspended</option>
+          </select>
+        </Field>
+      )}
       <button disabled={saving} type="submit" className="mt-2 primary-gradient text-on-primary h-10 rounded-lg font-bold text-sm disabled:opacity-60">
-        {saving ? 'Saving...' : isEdit ? 'Update User' : 'Save User'}
+        {saving ? 'Saving...' : isEdit ? 'Update Driver' : 'Save Driver'}
       </button>
     </form>
   );
@@ -213,26 +286,47 @@ function FleetForm({ initial, onClose, onCreated }: { initial?: any; onClose: ()
   const [form, setForm] = useState({
     id: initial?.id || '',
     name: initial?.name || '',
-    capacity_kg: initial?.capacity_kg ?? 0,
-    volume_m3: initial?.volume_m3 ?? 0,
+    capacity_kg: initial?.capacity_kg || '',
+    volume_m3: initial?.volume_m3 || '',
     ev: initial?.ev ?? false,
-    driver_name: initial?.driver_name || '',
+    driver_id: initial?.driver_id || '',
+    depot_id: initial?.depot_id || '',
     license_plate: initial?.license_plate || '',
-    cost_per_km: initial?.cost_per_km ?? 0,
-    max_shift_hours: initial?.max_shift_hours ?? 8,
+    cost_per_km: initial?.cost_per_km || '',
+    max_shift_hours: initial?.max_shift_hours || '',
   });
   const [saving, setSaving] = useState(false);
+  const [drivers, setDrivers] = useState<any[]>([]);
+  const [depots, setDepots] = useState<any[]>([]);
   const isEdit = !!initial;
+
+  useEffect(() => {
+    api.listDrivers().then(setDrivers).catch(console.error);
+    api.listDepots().then(setDepots).catch(console.error);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
       if (isEdit) {
-        const { id, ...updateData } = form;
+        const { id, ...updateData } = {
+          ...form,
+          capacity_kg: form.capacity_kg ? Number(form.capacity_kg) : 0,
+          volume_m3: form.volume_m3 ? Number(form.volume_m3) : 0,
+          cost_per_km: form.cost_per_km ? Number(form.cost_per_km) : 0,
+          max_shift_hours: form.max_shift_hours ? Number(form.max_shift_hours) : 8,
+        };
         await api.updateFleetVehicle(initial.id, updateData);
       } else {
-        await api.createFleetVehicle(form);
+        const submitData = {
+          ...form,
+          capacity_kg: form.capacity_kg ? Number(form.capacity_kg) : 0,
+          volume_m3: form.volume_m3 ? Number(form.volume_m3) : 0,
+          cost_per_km: form.cost_per_km ? Number(form.cost_per_km) : 0,
+          max_shift_hours: form.max_shift_hours ? Number(form.max_shift_hours) : 8,
+        };
+        await api.createFleetVehicle(submitData);
       }
       onCreated();
       onClose();
@@ -242,18 +336,43 @@ function FleetForm({ initial, onClose, onCreated }: { initial?: any; onClose: ()
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-      {!isEdit && <Field label="Vehicle ID"><input className={inputCls()} required value={form.id} onChange={e => setForm(p => ({ ...p, id: e.target.value }))} placeholder="e.g. TRK-001" /></Field>}
+      {!isEdit && (
+        <Field label="Vehicle ID">
+          <div className="flex gap-2">
+            <input className={`${inputCls()} flex-1`} required value={form.id} onChange={e => setForm(p => ({ ...p, id: e.target.value }))} placeholder="e.g. TRK-001" />
+            <button
+              type="button"
+              onClick={() => setForm(p => ({ ...p, id: generateId() }))}
+              className="px-3 py-2 bg-surface-container-low hover:bg-surface-container text-sm font-medium text-on-surface rounded-lg transition-colors flex items-center gap-1"
+              title="Generate random ID"
+            >
+              <Zap size={14} /> Gen
+            </button>
+          </div>
+        </Field>
+      )}
       <Field label="Vehicle Name"><input className={inputCls()} required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Max Weight (kg)"><input type="number" className={inputCls()} required value={form.capacity_kg} onChange={e => setForm(p => ({ ...p, capacity_kg: Number(e.target.value) }))} /></Field>
-        <Field label="Max Volume (m³)"><input type="number" className={inputCls()} required value={form.volume_m3} onChange={e => setForm(p => ({ ...p, volume_m3: Number(e.target.value) }))} /></Field>
+        <Field label="Max Weight (kg)"><input type="number" className={inputCls()} required value={form.capacity_kg} onChange={e => setForm(p => ({ ...p, capacity_kg: e.target.value }))} /></Field>
+        <Field label="Max Volume (m³)"><input type="number" className={inputCls()} required value={form.volume_m3} onChange={e => setForm(p => ({ ...p, volume_m3: e.target.value }))} /></Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Cost/km"><input type="number" step="0.01" className={inputCls()} value={form.cost_per_km} onChange={e => setForm(p => ({ ...p, cost_per_km: Number(e.target.value) }))} /></Field>
-        <Field label="Max Shift (hrs)"><input type="number" className={inputCls()} value={form.max_shift_hours} onChange={e => setForm(p => ({ ...p, max_shift_hours: Number(e.target.value) }))} /></Field>
+        <Field label="Cost/km"><input type="number" step="0.01" className={inputCls()} value={form.cost_per_km} onChange={e => setForm(p => ({ ...p, cost_per_km: e.target.value }))} /></Field>
+        <Field label="Max Shift (hrs)"><input type="number" className={inputCls()} value={form.max_shift_hours} onChange={e => setForm(p => ({ ...p, max_shift_hours: e.target.value }))} /></Field>
       </div>
       <Field label="License Plate"><input className={inputCls()} value={form.license_plate} onChange={e => setForm(p => ({ ...p, license_plate: e.target.value }))} placeholder="e.g. 30A-12345" /></Field>
-      <Field label="Driver Name"><input className={inputCls()} value={form.driver_name} onChange={e => setForm(p => ({ ...p, driver_name: e.target.value }))} /></Field>
+      <Field label="Depot">
+        <select className={inputCls()} required value={form.depot_id} onChange={e => setForm(p => ({ ...p, depot_id: e.target.value }))}>
+          <option value="">Select Depot...</option>
+          {depots.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Assigned Driver">
+        <select className={inputCls()} value={form.driver_id} onChange={e => setForm(p => ({ ...p, driver_id: e.target.value }))}>
+          <option value="">Select Driver...</option>
+          {drivers.map(d => <option key={d.id} value={d.id}>{d.full_name || 'Unknown'} ({d.id})</option>)}
+        </select>
+      </Field>
       <label className="flex items-center gap-3 cursor-pointer p-3 bg-surface-container-low rounded-lg border border-outline-variant/10 hover:bg-surface-container transition-colors">
         <input type="checkbox" checked={form.ev} onChange={e => setForm(p => ({ ...p, ev: e.target.checked }))} className="w-4 h-4 rounded accent-primary" />
         <div className="flex items-center gap-2 text-sm font-semibold text-on-surface"><Zap size={16} className="text-primary" /> Electric Vehicle (EV)</div>
@@ -271,17 +390,65 @@ function DepotForm({ initial, onClose, onCreated }: { initial?: any; onClose: ()
   const [form, setForm] = useState({
     name: initial?.name || '',
     address: initial?.address || '',
-    lat: initial?.coordinates?.lat ?? 0,
-    lng: initial?.coordinates?.lng ?? 0,
+    lat: initial?.coordinates?.lat || '',
+    lng: initial?.coordinates?.lng || '',
   });
   const [saving, setSaving] = useState(false);
+  const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
   const isEdit = !!initial;
+
+  const handleAddressChange = (value: string) => {
+    setForm(p => ({ ...p, address: value }));
+    
+    // Clear existing timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+    
+    // Only search if query is at least 2 characters
+    if (value.length >= 2) {
+      const timeout = setTimeout(async () => {
+        try {
+          const results = await api.geocodeAutocomplete(value, 5);
+          setAddressSuggestions(results);
+          setShowSuggestions(true);
+        } catch (error) {
+          console.error('Address search failed:', error);
+          setAddressSuggestions([]);
+        }
+      }, 300); // 300ms debounce
+      
+      setSearchTimeout(timeout);
+    } else {
+      setAddressSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+  
+  const handleSelectAddress = (suggestion: any) => {
+    setForm(p => ({
+      ...p,
+      address: suggestion.display_name,
+      lat: suggestion.lat.toString(),
+      lng: suggestion.lng.toString(),
+    }));
+    setShowSuggestions(false);
+    setAddressSuggestions([]);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const payload = { name: form.name, coordinates: { lat: form.lat, lng: form.lng } };
+      const payload = {
+        name: form.name,
+        coordinates: {
+          lat: parseFloat(form.lat) || 0,
+          lng: parseFloat(form.lng) || 0,
+        },
+      };
       if (isEdit) {
         await api.updateDepot(initial.id, payload);
       } else {
@@ -296,13 +463,39 @@ function DepotForm({ initial, onClose, onCreated }: { initial?: any; onClose: ()
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
       <Field label="Depot Name"><input className={inputCls()} required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></Field>
-      <Field label="Address"><input className={inputCls()} value={form.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} placeholder="e.g. 123 Giai Phong, Ha Noi" /></Field>
+      <Field label="Address">
+        <div className="relative">
+          <input
+            className={inputCls()}
+            required
+            value={form.address}
+            onChange={e => handleAddressChange(e.target.value)}
+            placeholder="e.g. 123 Giai Phong, Ha Noi"
+            onFocus={() => setShowSuggestions(addressSuggestions.length > 0)}
+          />
+          {showSuggestions && addressSuggestions.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+              {addressSuggestions.map((suggestion, index) => (
+                <button
+                  key={suggestion.place_id || index}
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-surface-container-low transition-colors border-b border-outline-variant/10 last:border-b-0"
+                  onClick={() => handleSelectAddress(suggestion)}
+                >
+                  <div className="font-medium text-on-surface">{suggestion.display_name}</div>
+                  <div className="text-xs text-on-surface-variant mt-0.5">{suggestion.address}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Latitude"><input type="number" step="0.000001" className={inputCls()} value={form.lat || ''} onChange={e => setForm(p => ({ ...p, lat: Number(e.target.value) }))} placeholder="e.g. 21.028" /></Field>
-        <Field label="Longitude"><input type="number" step="0.000001" className={inputCls()} value={form.lng || ''} onChange={e => setForm(p => ({ ...p, lng: Number(e.target.value) }))} placeholder="e.g. 105.834" /></Field>
+        <Field label="Latitude"><input type="number" step="0.000001" className={inputCls()} value={form.lat || ''} onChange={e => setForm(p => ({ ...p, lat: e.target.value }))} placeholder="e.g. 21.028" /></Field>
+        <Field label="Longitude"><input type="number" step="0.000001" className={inputCls()} value={form.lng || ''} onChange={e => setForm(p => ({ ...p, lng: e.target.value }))} placeholder="e.g. 105.834" /></Field>
       </div>
       <div className="flex items-center gap-2">
-        <span className="text-sm text-outline cursor-pointer hover:text-primary transition-colors flex items-center gap-1 font-medium"><MapPin size={16} /> Auto-Geocode from Address</span>
+        <span className="text-sm text-outline cursor-pointer hover:text-primary transition-colors flex items-center gap-1 font-medium"><MapPin size={16} /> Coordinates auto-filled from address search</span>
       </div>
       <button disabled={saving} type="submit" className="mt-2 primary-gradient text-on-primary h-10 rounded-lg font-bold text-sm disabled:opacity-60">
         {saving ? 'Saving...' : isEdit ? 'Update Depot' : 'Save Depot'}
@@ -322,29 +515,30 @@ function ActionBtns({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => 
   );
 }
 
-function UsersTable({ usersData, onEdit, onDelete }: { usersData: any[]; onEdit: (u: any) => void; onDelete: (u: any) => void }) {
+function DriversTable({ driversData, onEdit, onDelete }: { driversData: any[]; onEdit: (d: any) => void; onDelete: (d: any) => void }) {
   return (
     <table className="w-full text-left text-sm whitespace-nowrap">
       <thead className="bg-surface-container-low/50 sticky top-0 z-10 font-bold text-on-surface-variant uppercase text-xs tracking-wider border-b border-outline-variant/10">
-        <tr><th className="px-6 py-4">User / Driver</th><th className="px-6 py-4">Role</th><th className="px-6 py-4">Phone</th><th className="px-6 py-4">Status</th><th className="px-6 py-4 text-right">Actions</th></tr>
+        <tr><th className="px-6 py-4">Driver</th><th className="px-6 py-4">License</th><th className="px-6 py-4">Phone</th><th className="px-6 py-4">Vehicle</th><th className="px-6 py-4">Status</th><th className="px-6 py-4 text-right">Actions</th></tr>
       </thead>
       <tbody className="divide-y divide-outline-variant/10">
-        {usersData.length === 0
-          ? <tr><td colSpan={5} className="px-6 py-8 text-sm text-on-surface-variant text-center">No users found. Click "Add User/Driver" to create one.</td></tr>
-          : usersData.map(u => (
-            <tr key={u.id} className="hover:bg-surface-container-low/50 transition-colors group">
+        {driversData.length === 0
+          ? <tr><td colSpan={6} className="px-6 py-8 text-sm text-on-surface-variant text-center">No drivers found. Click "Add Driver" to create one.</td></tr>
+          : driversData.map(d => (
+            <tr key={d.id} className="hover:bg-surface-container-low/50 transition-colors group">
               <td className="px-6 py-4">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-bold text-xs uppercase shrink-0">
-                    {(u.full_name || '?').split(' ').map((n: string) => n[0]).join('').substring(0, 2)}
+                    {(d.full_name || '?').split(' ').map((n: string) => n[0]).join('').substring(0, 2)}
                   </div>
-                  <div><p className="font-bold text-on-surface text-sm">{u.full_name || 'Unknown'}</p><p className="text-[11px] text-on-surface-variant mt-0.5">{u.email || '-'}</p></div>
+                  <div><p className="font-bold text-on-surface text-sm">{d.full_name || 'Unknown'}</p><p className="text-[11px] text-on-surface-variant mt-0.5">{d.email || '-'}</p></div>
                 </div>
               </td>
-              <td className="px-6 py-4"><span className="font-bold text-on-surface bg-surface-container px-3 py-1 rounded-lg text-[11px] uppercase tracking-wider">{u.role || 'N/A'}</span></td>
-              <td className="px-6 py-4 text-on-surface-variant text-xs font-mono">{u.phone || '-'}</td>
-              <td className="px-6 py-4"><span className="bg-success/10 text-success px-3 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 w-fit"><CheckCircle2 size={12} /> Active</span></td>
-              <td className="px-6 py-4 text-right"><ActionBtns onEdit={() => onEdit(u)} onDelete={() => onDelete(u)} /></td>
+              <td className="px-6 py-4"><span className="font-mono text-xs text-on-surface-variant">{d.license_number || '-'}</span></td>
+              <td className="px-6 py-4 text-on-surface-variant text-xs font-mono">{d.phone || '-'}</td>
+              <td className="px-6 py-4"><span className="font-bold text-primary font-mono text-xs">{d.vehicle_id || <span className="text-outline italic">Unassigned</span>}</span></td>
+              <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 w-fit ${d.status === 'active' ? 'bg-success/10 text-success' : d.status === 'suspended' ? 'bg-error/10 text-error' : 'bg-outline/10 text-outline'}`}><CheckCircle2 size={12} /> {d.status || 'active'}</span></td>
+              <td className="px-6 py-4 text-right"><ActionBtns onEdit={() => onEdit(d)} onDelete={() => onDelete(d)} /></td>
             </tr>
           ))
         }
@@ -372,7 +566,7 @@ function FleetTable({ fleetData, onEdit, onDelete }: { fleetData: any[]; onEdit:
                 </div>
               </td>
               <td className="px-6 py-4 font-mono text-on-surface-variant text-xs">{v.capacity_kg ?? 0} <span className="opacity-40">kg</span> / {v.volume_m3 ?? 0} <span className="opacity-40">m³</span></td>
-              <td className="px-6 py-4 font-medium text-on-surface-variant">{v.driver_name || <span className="text-outline italic text-xs">Unassigned</span>}</td>
+              <td className="px-6 py-4 font-medium text-on-surface-variant">{v.driver_id || <span className="text-outline italic text-xs">Unassigned</span>}</td>
               <td className="px-6 py-4 text-xs text-on-surface-variant font-mono">{v.license_plate || '-'}</td>
               <td className="px-6 py-4 text-right"><ActionBtns onEdit={() => onEdit(v)} onDelete={() => onDelete(v)} /></td>
             </tr>

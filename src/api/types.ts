@@ -49,7 +49,7 @@ export interface VehicleCreateDTO {
   max_shift_hours?: number | null;
   depot_lat?: number | null;
   depot_lon?: number | null;
-  driver_name?: string | null;
+  driver_id?: string | null;
 }
 
 export interface OptimizeRunRequestDTO {
@@ -120,7 +120,7 @@ export interface VehicleUpdateDTO {
   max_shift_hours?: number | null;
   depot_lat?: number | null;
   depot_lon?: number | null;
-  driver_name?: string | null;
+  driver_id?: string | null;
 }
 
 export interface DepotUpdateDTO {
@@ -134,6 +134,220 @@ export interface UserUpdateDTO {
   role?: string;
   phone?: string | null;
   email?: string | null;
+}
+
+export interface UserDepotAssignDTO {
+  depot_id: string;
+}
+
+// ==================== GEOCODING TYPES ====================
+
+export interface GeocodeAutocompleteResult {
+  place_id: string;
+  display_name: string;
+  address: string;
+  lat: number;
+  lng: number;
+}
+
+export interface GeocodePlaceDetail {
+  place_id: string;
+  display_name: string;
+  address: string;
+  lat: number;
+  lng: number;
+}
+
+export interface GeocodeForwardResult {
+  lat: number;
+  lng: number;
+  display_name: string;
+  address: string;
+}
+
+export interface GeocodeReverseResult {
+  lat: number;
+  lng: number;
+  display_name: string;
+  address: string;
+}
+
+// ==================== METRICS TYPES ====================
+
+export interface MetricsResponse {
+  total_active_routes: number;
+  total_vehicles: number;
+  vehicles_in_use: number;
+  vehicle_utilization_pct: number;
+  total_distance_km: number;
+  cost_savings_usd: number;
+  efficiency_trend: number[];
+}
+
+export interface RouteMetricsResponse {
+  route_id: string;
+  status: string;
+  total_distance_km: number;
+  total_duration_mins: number;
+  total_cost: number;
+  stop_count: number;
+  completed_stops: number;
+  completion_pct: number;
+}
+
+// ==================== ROUTES TYPES ====================
+
+export interface RouteSummary {
+  id: string;
+  vehicle_id: string;
+  depot_id: string;
+  job_id: string;
+  status: 'planned' | 'dispatched' | 'in_progress' | 'completed' | 'cancelled';
+  total_distance_km: number;
+  total_duration_mins: number;
+  total_cost: number;
+  load_kg: number;
+  utilization_pct: number;
+  stop_count: number;
+}
+
+export interface ActiveRoute {
+  route_id: string;
+  vehicle_id: string;
+  driver_name: string;
+  tracking_status: 'on_time' | 'delayed' | 'early';
+  progress_percentage: number;
+  current_coordinates: { lat: number; lng: number };
+  next_stop: {
+    id: string;
+    location_id: string;
+    location_name: string;
+    sequence_index: number;
+    status: string;
+  };
+  delay_mins: number;
+  updated_at: string;
+}
+
+export interface ActiveRouteTracking {
+  route_id: string;
+  vehicle_id: string;
+  driver_name: string;
+  tracking_status: 'on_time' | 'delayed' | 'early';
+  progress_percentage: number;
+  current_coordinates: { lat: number; lng: number };
+  next_stop: {
+    id: string;
+    location_id: string;
+    location_name: string;
+    sequence_index: number;
+    status: string;
+  } | null;
+  delay_mins: number;
+  updated_at: string;
+}
+
+export interface StopDetail {
+  stop_id: string;
+  location_id: string;
+  name: string;
+  address: string;
+  sequence: number;
+  status: string;
+  demand_kg: number;
+  service_time_mins: number;
+  time_window_start?: string;
+  time_window_end?: string;
+  actual_arrived_at?: string;
+  actual_completed_at?: string;
+  notes?: string;
+  proof_of_delivery_url?: string;
+}
+
+export interface RouteDetail {
+  id: string;
+  vehicle_id: string;
+  driver_name: string;
+  status: string;
+  stops: RouteStop[];
+  total_distance_km: number;
+  total_duration_mins: number;
+  total_cost: number;
+  load_kg: number;
+  utilization_pct: number;
+  stop_count: number;
+  completed_stops: number;
+  completion_pct: number;
+}
+
+export interface RouteStop {
+  stop_id: string;
+  location_id: string;
+  name: string;
+  address: string;
+  sequence: number;
+  status: 'pending' | 'arrived' | 'completed' | 'failed' | 'skipped';
+  actual_arrived_at?: string;
+  actual_completed_at?: string;
+  notes?: string;
+}
+
+export interface RouteManifest {
+  route_id: string;
+  vehicle_id: string;
+  driver_name: string;
+  status: string;
+  stops: RouteStop[];
+}
+
+// ==================== OPTIMIZATION TYPES ====================
+
+export interface OptimizationRequest {
+  project_id: string;
+  solver_algorithm?: string;
+  objective?: string;
+  vehicles: string[];
+  locations: string[];
+  constraints?: {
+    avoid_tolls?: boolean;
+    strict_time_windows?: boolean;
+    respect_capacity?: boolean;
+  };
+}
+
+export interface OptimizationJobResponse {
+  job_id: string;
+  status: 'calculating' | 'completed' | 'failed' | 'cancelled';
+  estimated_time_seconds?: number;
+}
+
+export interface OptimizationJob {
+  job_id: string;
+  status: 'calculating' | 'completed' | 'failed' | 'cancelled';
+  solver_algorithm?: string;
+  objective?: string;
+  created_at: string;
+  updated_at?: string;
+  result?: OptimizationResult;
+  estimated_time_seconds?: number;
+}
+
+export interface OptimizationResult {
+  total_distance_km: number;
+  total_duration_mins: number;
+  total_cost: number;
+  routes: OptimizationRoute[];
+}
+
+export interface OptimizationRoute {
+  route_id: string;
+  vehicle_id: string;
+  stop_count: number;
+  load_kg: number;
+  utilization_pct: number;
+  distance_km: number;
+  duration_mins: number;
+  cost: number;
 }
 
 // ==================== DRIVER TYPES ====================
@@ -158,6 +372,7 @@ export interface DriverCreateDTO {
   license_number?: string | null;
   license_expiry?: string | null;
   vehicle_id?: string | null;
+  depot_id?: string;
 }
 
 export interface DriverUpdateDTO {
@@ -324,70 +539,6 @@ export interface RouteSummary {
   duration_mins: number;
 }
 
-export interface RouteDetail {
-  id: string;
-  vehicle_id: string;
-  depot_id: string;
-  job_id: string;
-  status: RouteStatus;
-  total_distance_km: number;
-  total_duration_mins: number;
-  total_cost: number;
-  load_kg: number;
-  utilization_pct: number;
-  stop_count: number;
-  stops: StopDetail[];
-}
-
-export interface StopDetail {
-  stop_id: string;
-  location_id: string;
-  name: string;
-  address: string;
-  sequence: number;
-  status: StopStatus;
-  demand_kg: number;
-  service_time_mins: number;
-  time_window_start: string;
-  time_window_end: string;
-  actual_arrived_at?: string;
-  actual_completed_at?: string;
-}
-
-export interface ActiveRouteTracking {
-  route_id: string;
-  vehicle_id: string;
-  driver_name: string;
-  tracking_status: TrackingStatus;
-  progress_percentage: number;
-  current_coordinates: { lat: number; lng: number };
-  next_stop: {
-    id: string;
-    location_id: string;
-    location_name: string;
-    sequence_index: number;
-    status: StopStatus;
-  } | null;
-  delay_mins: number;
-  updated_at: string;
-}
-
-export interface RouteManifest {
-  route_id: string;
-  vehicle_id: string;
-  driver_name: string;
-  status: RouteStatus;
-  stops: ManifestStop[];
-}
-
-export interface ManifestStop {
-  stop_id: string;
-  location_id: string;
-  name: string;
-  address: string;
-  sequence: number;
-  status: StopStatus;
-}
 
 export interface UserResponse {
   id: string;

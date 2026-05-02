@@ -185,6 +185,14 @@ export const api = {
     }),
   deleteUser: (userId: string) => fetchApi<void>(`/api/v1/users/${userId}`, { method: 'DELETE' }),
 
+  // Current User Depot Assignment (for sharing depot management)
+  assignMyDepot: (data: Types.UserDepotAssignDTO) =>
+    fetchApi<{ success: boolean; message: string }>('/api/v1/users/me/depots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+
   // V1 Drivers (Dispatcher management)
   listDrivers: () => fetchApi<Types.DriverResponse[]>('/api/v1/drivers'),
   getDriver: (driverId: string) => fetchApi<Types.DriverResponse>(`/api/v1/drivers/${driverId}`),
@@ -213,6 +221,29 @@ export const api = {
     }),
   getDriverStopStatus: (stopId: string) => fetchApi<Types.StopDetail>(`/api/v1/driver/stops/${stopId}`),
 
+  // V1 Geocoding
+  geocodeAutocomplete: (query: string, limit: number = 5) =>
+    fetchApi<Types.GeocodeAutocompleteResult[]>(`/api/v1/geocode/autocomplete?q=${encodeURIComponent(query)}&limit=${limit}`),
+  geocodePlaceDetail: (placeId: string) =>
+    fetchApi<Types.GeocodePlaceDetail>(`/api/v1/geocode/place/${encodeURIComponent(placeId)}`),
+  geocodeForward: (address: string) =>
+    fetchApi<Types.GeocodeForwardResult>(`/api/v1/geocode/forward?address=${encodeURIComponent(address)}`),
+  geocodeReverse: (lat: number, lng: number) =>
+    fetchApi<Types.GeocodeReverseResult>(`/api/v1/geocode/reverse?lat=${lat}&lng=${lng}`),
+
+  // V1 Metrics
+  getMetricsDashboard: () => fetchApi<Types.MetricsResponse>('/api/v1/metrics/dashboard'),
+
+  // V1 Routes
+  getRoutes: () => fetchApi<Types.RouteSummary[]>('/api/v1/routes'),
+  getOptimizationJobs: () => fetchApi<Types.OptimizationJob[]>('/api/v1/optimize/jobs'),
+  getOptimizationJob: (jobId: string) => fetchApi<Types.OptimizationJob>(`/api/v1/optimize/job/${jobId}`),
+  cancelOptimizationJob: (jobId: string) => 
+    fetchApi<{ success: boolean; job_id: string; status: string }>(`/api/v1/optimize/job/${jobId}/cancel`, {
+      method: 'POST',
+    }),
+
+  
   // Auth
   authRegister: (data: Types.AuthRegisterDTO) =>
     fetchApi<Types.AuthResponse>('/api/v1/auth/register', {

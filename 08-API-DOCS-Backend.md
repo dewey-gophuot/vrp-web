@@ -22,8 +22,9 @@
 9. [Routes — Quản lý Lộ trình](#9-routes--quản-lý-lộ-trình)
 10. [Driver App — Ứng dụng Tài xế](#10-driver-app--ứng-dụng-tài-xế)
 11. [Metrics — Thống kê](#11-metrics--thống-kê)
-12. [Enums](#12-enums)
-13. [Luồng nghiệp vụ đầy đủ](#13-luồng-nghiệp-vụ-đầy-đủ)
+12. [Geocoding — Tra cứu địa điểm](#12-geocoding--tra-cứu-địa-điểm)
+13. [Enums](#13-enums)
+14. [Luồng nghiệp vụ đầy đủ](#14-luồng-nghiệp-vụ-đầy-đủ)
 
 ---
 
@@ -308,11 +309,15 @@ Danh sách tài xế.
   {
     "id": "01HV2XABCDEF123456789012",
     "full_name": "Nguyễn Văn A",
+    "email": "a@example.com",
     "phone": "0901234567",
-    "license_no": "B2-012345",
+    "license_number": "B2-012345",
+    "license_expiry": "2027-01-15",
     "status": "active",
     "depot_id": "depot-hanoi",
-    "admin_id": "user-3f2a1b9c"
+    "admin_id": "user-3f2a1b9c",
+    "vehicle_id": "TRK-001",
+    "vehicle_name": "Xe tải 1.5T"
   }
 ]
 ```
@@ -326,9 +331,12 @@ Admin tạo tài xế mới. `admin_id` tự động lấy từ token người �
 ```json
 {
   "full_name": "Nguyễn Văn A",
+  "email": "a@example.com",
   "phone": "0901234567",
-  "license_no": "B2-012345",
+  "license_number": "B2-012345",
+  "license_expiry": "2027-01-15",
   "depot_id": "depot-hanoi",
+  "vehicle_id": "TRK-001",
   "status": "active"
 }
 ```
@@ -336,9 +344,12 @@ Admin tạo tài xế mới. `admin_id` tự động lấy từ token người �
 | Field | Type | Bắt buộc | Ghi chú |
 |---|---|---|---|
 | `full_name` | string | ✅ | |
-| `depot_id` | string | ✅ | Phải tồn tại trong DB |
+| `email` | string | ❌ | |
 | `phone` | string | ❌ | |
-| `license_no` | string | ❌ | Số GPLX |
+| `license_number` | string | ❌ | Số GPLX |
+| `license_expiry` | date | ❌ | Ngày hết hạn GPLX (YYYY-MM-DD) |
+| `depot_id` | string | ❌ | Có thể để trống, gán depot sau bằng `PUT` |
+| `vehicle_id` | string | ❌ | Gán xe cho tài xế (nếu xe tồn tại) |
 | `status` | enum | ❌ | Default `active` |
 
 **Response** `201` — `DriverResponse` với `id` là ULID
@@ -368,7 +379,10 @@ Xoá tài xế.
 
 > ⚠️ Không thể xoá tài xế đang được gán cho xe.
 
-**Response** `204`  
+**Response** `200`
+```json
+{ "success": true, "message": "Driver '01HV2X...' deleted" }
+```
 **Response** `409` — Tài xế còn gán xe
 
 ---
@@ -397,7 +411,7 @@ Danh sách tất cả xe.
     "max_shift_hours": 8,
     "ev": false,
     "depot_id": "depot-hanoi",
-    "driver_id": "user-abc123",
+    "driver_id": "01HV2XABCDEF123456789012",
     "driver_name": "Nguyễn Văn A",
     "created_at": "...",
     "updated_at": "..."
@@ -421,19 +435,19 @@ Thêm xe mới.
   "cost_per_km": 1.45,
   "ev": false,
   "depot_id": "depot-hanoi",
-  "driver_id": "user-abc123"
+  "driver_id": "01HV2XABCDEF123456789012"
 }
 ```
 
 | Field | Type | Bắt buộc | Ghi chú |
 |---|---|---|---|
 | `name` | string | ✅ | |
-| `depot_id` | string | ✅ | Phải tồn tại trong DB |
+| `depot_id` | string | ❌ | Có thể để trống, gán depot sau |
 | `capacity_kg` | int ≥ 0 | ❌ | Default 0 |
 | `volume_m3` | float ≥ 0 | ❌ | Default 0 |
 | `cost_per_km` | float ≥ 0 | ❌ | Default 0 |
 | `ev` | bool | ❌ | Default false |
-| `driver_id` | string | ❌ | Gán tài xế (role=driver) |
+| `driver_id` | string | ❌ | ULID tài xế, phải tồn tại trong DB |
 
 ---
 
@@ -452,6 +466,10 @@ Xoá xe.
 
 > ⚠️ Không thể xoá xe đang có route active.
 
+**Response** `200`
+```json
+{ "success": true, "message": "Vehicle 'TRK-001' deleted" }
+```
 **Response** `409` nếu có route đang chạy.
 
 ---
@@ -910,7 +928,85 @@ Metrics chi tiết cho 1 route.
 
 ---
 
-## 12. Enums
+## 12. Geocoding — Tra cứu địa điểm
+
+> Prefix: `/api/v1/geocode`
+
+> Backend sử dụng **map provider** được cấu hình qua biến môi trường `MAP_PROVIDER` (hiện hỗ trợ: `locationiq`). Frontend không cần biết provider nào đang dùng — chỉ gọi đúng endpoints bên dưới.
+
+---
+
+### `GET /api/v1/geocode/autocomplete?q=&limit=`
+Gợi ý địa điểm khi người dùng gõ.
+
+| Param | Type | Bắt buộc | Ghi chú |
+|---|---|---|---|
+| `q` | string | ✅ | Tối thiểu 2 ký tự |
+| `limit` | int | ❌ | Default 5, max 10 |
+
+**Response** `200`
+```json
+[
+  {
+    "place_id": "123456789",
+    "display_name": "123 Nguyễn Huệ, Quận 1, TP.HCM",
+    "address": "123 Nguyễn Huệ, Quận 1, TP.HCM",
+    "lat": 10.7731,
+    "lng": 106.7030
+  }
+]
+```
+
+---
+
+### `GET /api/v1/geocode/place/{place_id}`
+Lấy chi tiết + tọa độ chính xác theo `place_id` từ kết quả autocomplete.
+
+**Response** `200`
+```json
+{
+  "place_id": "123456789",
+  "display_name": "123 Nguyễn Huệ, Quận 1, TP.HCM",
+  "address": "123 Nguyễn Huệ, Quận 1, TP.HCM",
+  "lat": 10.7731,
+  "lng": 106.7030
+}
+```
+
+---
+
+### `GET /api/v1/geocode/forward?address=`
+Chuyển địa chỉ text → tọa độ lat/lng.
+
+| Param | Type | Bắt buộc |
+|---|---|---|
+| `address` | string | ✅ |
+
+**Response** `200`
+```json
+{ "lat": 10.7731, "lng": 106.7030, "display_name": "...", "address": "..." }
+```
+**Response** `404` — Không tìm thấy địa chỉ
+
+---
+
+### `GET /api/v1/geocode/reverse?lat=&lng=`
+Chuyển tọa độ → địa chỉ text.
+
+| Param | Type | Bắt buộc |
+|---|---|---|
+| `lat` | float | ✅ |
+| `lng` | float | ✅ |
+
+**Response** `200`
+```json
+{ "lat": 10.7731, "lng": 106.7030, "display_name": "...", "address": "..." }
+```
+**Response** `404` — Không tìm thấy vị trí
+
+---
+
+## 13. Enums
 
 ### `UserRole` (dùng cho bảng `users`)
 | Value | Mô tả |
@@ -975,7 +1071,7 @@ Metrics chi tiết cho 1 route.
 
 ---
 
-## 13. Luồng nghiệp vụ đầy đủ
+## 14. Luồng nghiệp vụ đầy đủ
 
 ### Bước 0 — Xác thực
 ```
@@ -987,9 +1083,11 @@ POST /api/v1/auth/login      → Đăng nhập → lấy access_token
 
 ### Bước 1 — Setup hạ tầng (Admin)
 ```
+GET  /api/v1/geocode/autocomplete?q=...  → Tìm địa chỉ kho
+GET  /api/v1/geocode/place/{place_id}    → Lấy lat/lng chính xác
 POST /api/v1/locations/depots  → Tạo kho bãi (tự động gán admin tạo vào user_depots)
-POST /api/v1/drivers           → Tạo tài xế (ULID, gán depot_id)
-POST /api/v1/fleet/vehicles    → Thêm xe (gán depot_id + driver_id=ULID)
+POST /api/v1/drivers           → Tạo tài xế (ULID, depot_id optional)
+POST /api/v1/fleet/vehicles    → Thêm xe (depot_id & driver_id optional)
 ```
 
 ### Bước 2 — Nhập đơn hàng (Dispatcher)
@@ -1028,4 +1126,4 @@ GET /api/v1/routes/{id}/export       → Xuất báo cáo xlsx/pdf
 
 ---
 
-*Tài liệu tự động tổng hợp từ OpenAPI spec. Cập nhật lần cuối: 2026-05-02.*
+*Tài liệu tự động tổng hợp từ OpenAPI spec. Cập nhật lần cuối: 2026-05-03.*
