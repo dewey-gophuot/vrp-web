@@ -21,13 +21,13 @@ export default function ReportsView() {
         if (!routes || routes.length === 0) return;
         setAllRoutes(routes);
         const selected = routes[0];
-        setRouteId(selected.route_id);
+        setRouteId(selected.id);
         setVehicleId(selected.vehicle_id || 'N/A');
 
         const [reportRes, metricRes, manifestRes] = await Promise.all([
-          api.getRouteReport(selected.route_id),
-          api.getRouteMetrics(selected.route_id),
-          api.getRouteManifest(selected.route_id).catch(() => null),
+          api.getRouteReport(selected.id),
+          api.getRouteMetrics(selected.id),
+          api.getRouteManifest(selected.id).catch(() => null),
         ]);
 
         setMetrics(metricRes);
@@ -36,12 +36,12 @@ export default function ReportsView() {
           setStops(manifestRes.stops);
         } else {
           // Fallback: wrap raw IDs as objects for display
-          setStops((reportRes.stops || []).map((stopId: string) => ({
-            stop_id: stopId,
-            name: stopId,
-            address: '',
-            sequence: 0,
-            status: 'planned',
+          setStops((reportRes.stops || []).map((stop: any) => ({
+            stop_id: stop.stop_id || stop.id || 'unknown',
+            name: stop.name || stop.location_id || 'Unknown',
+            address: stop.address || '',
+            sequence: stop.sequence || 0,
+            status: stop.status || 'planned',
           })));
         }
       })

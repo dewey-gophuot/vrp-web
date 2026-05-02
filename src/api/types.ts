@@ -136,7 +136,286 @@ export interface UserUpdateDTO {
   email?: string | null;
 }
 
+// ==================== DRIVER TYPES ====================
+
+export interface DriverResponse {
+  id: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  license_number: string | null;
+  license_expiry: string | null;
+  status: 'active' | 'inactive' | 'suspended';
+  vehicle_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DriverCreateDTO {
+  full_name: string;
+  email?: string | null;
+  phone?: string | null;
+  license_number?: string | null;
+  license_expiry?: string | null;
+  vehicle_id?: string | null;
+}
+
+export interface DriverUpdateDTO {
+  full_name?: string;
+  email?: string | null;
+  phone?: string | null;
+  license_number?: string | null;
+  license_expiry?: string | null;
+  status?: 'active' | 'inactive' | 'suspended';
+  vehicle_id?: string | null;
+}
+
 export interface RouteStatusUpdateDTO {
   status: string;
   note?: string | null;
+}
+
+// ==================== AUTH TYPES ====================
+
+export interface AuthRegisterDTO {
+  email: string;
+  password: string;
+  full_name: string;
+  phone?: string;
+}
+
+export interface AuthLoginDTO {
+  email: string;
+  password: string;
+}
+
+export interface AuthChangePasswordDTO {
+  current_password: string;
+  new_password: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: UserResponse;
+}
+
+// ==================== ENUMS ====================
+
+export enum UserRole {
+  ADMIN = 'admin',
+  DISPATCHER = 'dispatcher',
+  DRIVER = 'driver',
+}
+
+export enum VehicleStatus {
+  AVAILABLE = 'available',
+  IN_USE = 'in_use',
+  MAINTENANCE = 'maintenance',
+  RETIRED = 'retired',
+}
+
+export enum SolverAlgorithm {
+  NEAREST_NEIGHBOR = 'nearest_neighbor',
+  GENETIC_ALGORITHM = 'genetic_algorithm',
+  CLARKE_WRIGHT_SAVINGS = 'clarke_wright_savings',
+}
+
+export enum Objective {
+  MINIMIZE_DISTANCE = 'minimize_distance',
+  MINIMIZE_TIME = 'minimize_time',
+  MINIMIZE_COST = 'minimize_cost',
+}
+
+export enum RouteStatus {
+  PLANNED = 'planned',
+  DISPATCHED = 'dispatched',
+  IN_PROGRESS = 'in_progress',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+}
+
+export enum StopStatus {
+  PENDING = 'pending',
+  EN_ROUTE = 'en_route',
+  ARRIVED = 'arrived',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  SKIPPED = 'skipped',
+}
+
+export enum TrackingStatus {
+  ON_TIME = 'on_time',
+  DELAYED = 'delayed',
+  OFF_ROUTE = 'off_route',
+}
+
+// ==================== RESPONSE TYPES ====================
+
+export interface DepotResponse {
+  id: string;
+  name: string;
+  coordinates: { lat: number; lng: number };
+  address: string;
+  operating_windows: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VehicleResponse {
+  id: string;
+  name: string;
+  license_plate: string;
+  status: VehicleStatus;
+  capacity_kg: number;
+  volume_m3: number;
+  cost_per_km: number;
+  cost_per_hour: number | null;
+  max_shift_hours: number;
+  ev: boolean;
+  depot_id: string;
+  driver_id: string;
+  driver_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LocationResponse {
+  id: string;
+  name: string;
+  address: string;
+  coordinates: { lat: number; lng: number };
+  demand_kg: number;
+  priority: number;
+  phone: string;
+  time_window_start: string;
+  time_window_end: string;
+  service_time_mins: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UploadManifestResponse {
+  success: boolean;
+  message: string;
+  uploaded_rows: number;
+  created_locations: number;
+  skipped_existing: number;
+}
+
+export interface OptimizeJobResponse {
+  job_id: string;
+  status: 'calculating' | 'completed' | 'cancelled' | 'failed';
+  estimated_time_seconds?: number;
+  result?: {
+    total_distance_km: number;
+    total_duration_mins: number;
+    routes: RouteSummary[];
+  };
+}
+
+export interface RouteSummary {
+  route_id: string;
+  vehicle_id: string;
+  stop_count: number;
+  load_kg: number;
+  utilization_pct: number;
+  distance_km: number;
+  duration_mins: number;
+}
+
+export interface RouteDetail {
+  id: string;
+  vehicle_id: string;
+  depot_id: string;
+  job_id: string;
+  status: RouteStatus;
+  total_distance_km: number;
+  total_duration_mins: number;
+  total_cost: number;
+  load_kg: number;
+  utilization_pct: number;
+  stop_count: number;
+  stops: StopDetail[];
+}
+
+export interface StopDetail {
+  stop_id: string;
+  location_id: string;
+  name: string;
+  address: string;
+  sequence: number;
+  status: StopStatus;
+  demand_kg: number;
+  service_time_mins: number;
+  time_window_start: string;
+  time_window_end: string;
+  actual_arrived_at?: string;
+  actual_completed_at?: string;
+}
+
+export interface ActiveRouteTracking {
+  route_id: string;
+  vehicle_id: string;
+  driver_name: string;
+  tracking_status: TrackingStatus;
+  progress_percentage: number;
+  current_coordinates: { lat: number; lng: number };
+  next_stop: {
+    id: string;
+    location_id: string;
+    location_name: string;
+    sequence_index: number;
+    status: StopStatus;
+  } | null;
+  delay_mins: number;
+  updated_at: string;
+}
+
+export interface RouteManifest {
+  route_id: string;
+  vehicle_id: string;
+  driver_name: string;
+  status: RouteStatus;
+  stops: ManifestStop[];
+}
+
+export interface ManifestStop {
+  stop_id: string;
+  location_id: string;
+  name: string;
+  address: string;
+  sequence: number;
+  status: StopStatus;
+}
+
+export interface UserResponse {
+  id: string;
+  full_name: string;
+  role: UserRole;
+  email: string | null;
+  phone: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DashboardMetrics {
+  total_active_routes: number;
+  total_vehicles: number;
+  vehicles_in_use: number;
+  vehicle_utilization_pct: number;
+  total_distance_km: number;
+  cost_savings_usd: number;
+  efficiency_trend: number[];
+}
+
+export interface RouteMetrics {
+  route_id: string;
+  status: RouteStatus;
+  total_distance_km: number;
+  total_duration_mins: number;
+  total_cost: number;
+  stop_count: number;
+  completed_stops: number;
+  completion_pct: number;
 }
