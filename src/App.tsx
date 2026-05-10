@@ -11,12 +11,12 @@ import SettingsView from './views/SettingsView';
 import AdminView from './views/AdminView';
 import LoginView from './views/LoginView';
 import RegisterView from './views/RegisterView';
+import DepotView from './views/DepotView';
+import FleetView from './views/FleetView';
 
 // Additional views for backend workflow
-const DepotView = () => <div className="p-6"><h2 className="text-xl font-bold">Depot Management</h2><p className="text-on-surface-variant mt-2">POST/GET /api/v1/locations/depots</p></div>;
 const UsersView = () => <div className="p-6"><h2 className="text-xl font-bold">Users Management</h2><p className="text-on-surface-variant mt-2">POST/GET /api/v1/users</p></div>;
 const DriversView = () => <div className="p-6"><h2 className="text-xl font-bold">Drivers Management</h2><p className="text-on-surface-variant mt-2">POST/GET /api/v1/drivers</p></div>;
-const FleetView = () => <div className="p-6"><h2 className="text-xl font-bold">Fleet Management</h2><p className="text-on-surface-variant mt-2">POST/GET /api/v1/fleet/vehicles</p></div>;
 const UploadManifestView = () => <div className="p-6"><h2 className="text-xl font-bold">Upload Manifest</h2><p className="text-on-surface-variant mt-2">POST /api/v1/locations/upload-manifest</p></div>;
 const OptimizeView = () => <div className="p-6"><h2 className="text-xl font-bold">Run Optimize</h2><p className="text-on-surface-variant mt-2">POST /api/v1/optimize/run</p></div>;
 const RouteDetailView = () => <div className="p-6"><h2 className="text-xl font-bold">Route Detail</h2><p className="text-on-surface-variant mt-2">GET /api/v1/routes/:id</p></div>;

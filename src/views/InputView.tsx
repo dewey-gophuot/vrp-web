@@ -310,6 +310,32 @@ export default function InputView() {
     finally { setIsDeletingLoc(false); }
   };
 
+  const handleEditLocation = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingLoc?.id) return;
+    if (!pointForm.name.trim()) { window.alert('Vui lòng nhập tên điểm giao.'); return; }
+    try {
+      setIsSubmittingPoint(true);
+      await api.updateLocation(editingLoc.id, {
+        name: pointForm.name,
+        address_string: pointForm.address,
+        lat: parseFloat(pointForm.lat) || 0,
+        lng: parseFloat(pointForm.lng) || 0,
+        demand_kg: pointForm.demand ? parseFloat(pointForm.demand) : 0,
+        time_window_start: pointForm.time_window_start || undefined,
+        time_window_end: pointForm.time_window_end || undefined,
+        service_time_mins: pointForm.service_time ? parseFloat(pointForm.service_time) : 15,
+        priority: parseInt(pointForm.priority) || 1,
+        phone: pointForm.phone || undefined,
+      });
+      loadFleetAndLocations();
+      setShowAddPoint(false);
+      setEditingLoc(null);
+      setPointForm({ id: '', name: '', address: '', lat: '', lng: '', demand: '', service_time: '15', time_window_start: '', time_window_end: '', priority: '1', phone: '' });
+    } catch (error) { console.error(error); window.alert('Cập nhật thất bại.'); }
+    finally { setIsSubmittingPoint(false); }
+  };
+
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-background relative">
       {/* Header */}
@@ -496,10 +522,32 @@ export default function InputView() {
                             </td>
                             <td className="px-6 py-5 text-right">
                               <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button className="p-2 text-outline hover:text-primary bg-surface-container-low rounded-lg hover:bg-primary/10 transition-colors">
+                                <button 
+                                  onClick={() => {
+                                    setEditingLoc(loc);
+                                    setPointForm({
+                                      id: loc.id || '',
+                                      name: loc.name || '',
+                                      address: loc.address_string || loc.address || '',
+                                      lat: loc.lat?.toString() || '',
+                                      lng: loc.lng?.toString() || '',
+                                      demand: loc.demand_kg?.toString() || loc.demand?.toString() || '',
+                                      service_time: loc.service_time_mins?.toString() || '15',
+                                      time_window_start: loc.time_window_start || '',
+                                      time_window_end: loc.time_window_end || '',
+                                      priority: loc.priority?.toString() || '1',
+                                      phone: loc.phone || '',
+                                    });
+                                    setShowAddPoint(true);
+                                  }}
+                                  className="p-2 text-outline hover:text-primary bg-surface-container-low rounded-lg hover:bg-primary/10 transition-colors"
+                                >
                                   <Edit2 size={14} />
                                 </button>
-                                <button className="p-2 text-outline hover:text-error bg-surface-container-low rounded-lg hover:bg-error/10 transition-colors">
+                                <button 
+                                  onClick={() => setDeletingLocId(loc.id)}
+                                  className="p-2 text-outline hover:text-error bg-surface-container-low rounded-lg hover:bg-error/10 transition-colors"
+                                >
                                   <Trash2 size={14} />
                                 </button>
                               </div>
@@ -997,10 +1045,10 @@ export default function InputView() {
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-outline/20 backdrop-blur-sm p-4">
           <div className="bg-surface-container-lowest w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center p-6 border-b border-outline-variant/10">
-              <h3 className="text-xl font-bold text-on-surface font-headline">Add Delivery Point</h3>
-              <button onClick={() => setShowAddPoint(false)} className="text-outline hover:text-on-surface p-1 rounded-lg hover:bg-surface-container"><X size={20} /></button>
+              <h3 className="text-xl font-bold text-on-surface font-headline">{editingLoc ? 'Edit Delivery Point' : 'Add Delivery Point'}</h3>
+              <button onClick={() => { setShowAddPoint(false); setEditingLoc(null); setPointForm({ id: '', name: '', address: '', lat: '', lng: '', demand: '', service_time: '15', time_window_start: '', time_window_end: '', priority: '1', phone: '' }); }} className="text-outline hover:text-on-surface p-1 rounded-lg hover:bg-surface-container"><X size={20} /></button>
             </div>
-            <form className="p-6 flex flex-col gap-4" onSubmit={handleAddPoint}>
+            <form className="p-6 flex flex-col gap-4" onSubmit={editingLoc ? handleEditLocation : handleAddPoint}>
               <div><label className="text-xs font-bold text-on-surface-variant uppercase">Order ID</label>
                 <div className="flex gap-2">
                   <input 
@@ -1008,16 +1056,19 @@ export default function InputView() {
                     placeholder="e.g. ORD-1099" 
                     value={pointForm.id} 
                     onChange={e => setPointForm(prev => ({ ...prev, id: e.target.value }))} 
-                    className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 flex-1" 
+                    readOnly={!!editingLoc}
+                    className={`mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 flex-1 ${editingLoc ? 'opacity-60 cursor-not-allowed' : ''}`} 
                   />
-                  <button
-                    type="button"
-                    onClick={() => setPointForm(prev => ({ ...prev, id: generateId() }))}
-                    className="mt-1 px-3 py-2 bg-surface-container-low hover:bg-surface-container text-sm font-medium text-on-surface rounded-lg transition-colors flex items-center gap-1"
-                    title="Generate random ID"
-                  >
-                    <Zap size={14} /> Gen
-                  </button>
+                  {!editingLoc && (
+                    <button
+                      type="button"
+                      onClick={() => setPointForm(prev => ({ ...prev, id: generateId() }))}
+                      className="mt-1 px-3 py-2 bg-surface-container-low hover:bg-surface-container text-sm font-medium text-on-surface rounded-lg transition-colors flex items-center gap-1"
+                      title="Generate random ID"
+                    >
+                      <Zap size={14} /> Gen
+                    </button>
+                  )}
                 </div>
               </div>
               <div><label className="text-xs font-bold text-on-surface-variant uppercase">Tên điểm giao</label><input type="text" placeholder="e.g. Metro Grocers #42" required value={pointForm.name} onChange={e => setPointForm(prev => ({ ...prev, name: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
@@ -1074,7 +1125,7 @@ export default function InputView() {
               </div>
               
               <button type="submit" disabled={isSubmittingPoint} className="mt-4 primary-gradient text-on-primary h-12 rounded-xl font-bold text-sm shadow-md disabled:opacity-60">
-                {isSubmittingPoint ? 'Saving...' : 'Add Point to Route'}
+                {isSubmittingPoint ? 'Saving...' : (editingLoc ? 'Update Point' : 'Add Point to Route')}
               </button>
             </form>
           </div>

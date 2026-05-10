@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronRight, Share, Download, Share2, Printer, FileText, Table, Database, Copy, ExternalLink, Clock } from 'lucide-react';
+import { ChevronRight, Share, Download, Share2, Printer, FileText, Table, Database, Copy, ExternalLink, Clock, Loader2, MapPin, ChevronDown } from 'lucide-react';
 import api from '../api';
+import ProviderMap from '../components/ProviderMap';
+import { mapProvider, type MapMarker } from '../api/mapProvider';
 
 export default function ReportsView() {
   const [routeId, setRouteId] = useState('N/A');
@@ -9,44 +11,70 @@ export default function ReportsView() {
   const [stops, setStops] = useState<any[]>([]);
   const [allRoutes, setAllRoutes] = useState<any[]>([]);
   const [fleet, setFleet] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showRouteDropdown, setShowRouteDropdown] = useState(false);
+  const [isExporting, setIsExporting] = useState<string | null>(null);
 
+  // Load all routes initially
   useEffect(() => {
-    // Load fleet for capacity utilization
-    api.getFleetVehicles()
-      .then(res => setFleet(res || []))
-      .catch(console.error);
-
-    api.listRoutes()
-      .then(async (routes) => {
-        if (!routes || routes.length === 0) return;
-        setAllRoutes(routes);
-        const selected = routes[0];
-        setRouteId(selected.id);
-        setVehicleId(selected.vehicle_id || 'N/A');
-
-        const [reportRes, metricRes, manifestRes] = await Promise.all([
-          api.getRouteReport(selected.id),
-          api.getRouteMetrics(selected.id),
-          api.getRouteManifest(selected.id).catch(() => null),
-        ]);
-
-        setMetrics(metricRes);
-        // Prefer manifest stops (objects with name/address) over raw stop IDs
-        if (manifestRes?.stops && manifestRes.stops.length > 0) {
-          setStops(manifestRes.stops);
-        } else {
-          // Fallback: wrap raw IDs as objects for display
-          setStops((reportRes.stops || []).map((stop: any) => ({
-            stop_id: stop.stop_id || stop.id || 'unknown',
-            name: stop.name || stop.location_id || 'Unknown',
-            address: stop.address || '',
-            sequence: stop.sequence || 0,
-            status: stop.status || 'planned',
-          })));
-        }
-      })
-      .catch(console.error);
+    loadFleetAndRoutes();
   }, []);
+
+  // Load fleet and routes list
+  const loadFleetAndRoutes = async () => {
+    try {
+      const [fleetRes, routes] = await Promise.all([
+        api.getFleetVehicles(),
+        api.listRoutes(),
+      ]);
+      setFleet(fleetRes || []);
+      if (routes && routes.length > 0) {
+        setAllRoutes(routes);
+        // Select first route by default
+        await loadRouteData(routes[0].id);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  // Load data for a specific route
+  const loadRouteData = async (selectedRouteId: string) => {
+    setIsLoading(true);
+    try {
+      const selected = allRoutes.find(r => r.id === selectedRouteId) || { id: selectedRouteId, vehicle_id: 'N/A' };
+      setRouteId(selected.id);
+      setVehicleId(selected.vehicle_id || 'N/A');
+
+      const [reportRes, metricRes, manifestRes] = await Promise.all([
+        api.getRouteReport(selected.id),
+        api.getRouteMetrics(selected.id),
+        api.getRouteManifest(selected.id).catch(() => null),
+      ]);
+
+      setMetrics(metricRes);
+      // Prefer manifest stops (objects with name/address) over raw stop IDs
+      if (manifestRes?.stops && manifestRes.stops.length > 0) {
+        setStops(manifestRes.stops);
+      } else {
+        // Fallback: wrap raw IDs as objects for display
+        setStops((reportRes.stops || []).map((stop: any) => ({
+          stop_id: stop.stop_id || stop.id || 'unknown',
+          name: stop.name || stop.location_id || 'Unknown',
+          address: stop.address || '',
+          sequence: stop.sequence || 0,
+          status: stop.status || 'planned',
+          lat: stop.lat,
+          lng: stop.lng,
+        })));
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+      setShowRouteDropdown(false);
+    }
+  };
 
   // Build capacity utilization from routes + fleet
   const routeCapacityData = allRoutes.slice(0, 3).map((route, idx) => {
@@ -62,6 +90,24 @@ export default function ReportsView() {
     };
   });
 
+  // Map data - computed before JSX
+  const mapMarkers: MapMarker[] = stops
+    .filter((stop: any) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng)))
+    .map((stop: any, index: number) => ({
+      id: `${routeId}-${stop.stop_id || index}`,
+      lat: Number(stop.lat),
+      lng: Number(stop.lng),
+      label: stop.name || `Stop ${index + 1}`,
+      color: 'bg-primary',
+    }));
+
+  const mapCenter = mapMarkers.length > 0
+    ? {
+        lat: mapMarkers.reduce((sum, marker) => sum + marker.lat, 0) / mapMarkers.length,
+        lng: mapMarkers.reduce((sum, marker) => sum + marker.lng, 0) / mapMarkers.length,
+      }
+    : mapProvider.defaultCenter;
+
   return (
     <div className="flex-1 overflow-y-auto p-8 lg:p-12 bg-background">
       {/* Breadcrumbs & Header */}
@@ -73,7 +119,44 @@ export default function ReportsView() {
         </div>
         <div className="flex flex-wrap justify-between items-end gap-4">
           <div>
-            <h2 className="text-on-surface font-headline text-4xl font-extrabold tracking-tight">{routeId}</h2>
+            {/* Route Selector Dropdown */}
+            <div className="relative mb-2">
+              <button
+                onClick={() => setShowRouteDropdown(!showRouteDropdown)}
+                className="flex items-center gap-3 text-on-surface font-headline text-4xl font-extrabold tracking-tight hover:text-primary transition-colors"
+              >
+                {isLoading ? (
+                  <Loader2 size={32} className="animate-spin" />
+                ) : (
+                  <>
+                    {routeId}
+                    <ChevronDown size={24} className={`transition-transform ${showRouteDropdown ? 'rotate-180' : ''}`} />
+                  </>
+                )}
+              </button>
+              {showRouteDropdown && (
+                <div className="absolute top-full left-0 mt-2 w-72 bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/20 z-50 overflow-hidden">
+                  <div className="max-h-64 overflow-y-auto">
+                    {allRoutes.length === 0 ? (
+                      <div className="px-4 py-3 text-sm text-on-surface-variant">No routes available</div>
+                    ) : (
+                      allRoutes.map((route) => (
+                        <button
+                          key={route.id}
+                          onClick={() => loadRouteData(route.id)}
+                          className={`w-full text-left px-4 py-3 text-sm hover:bg-surface-container-low transition-colors flex items-center justify-between ${
+                            route.id === routeId ? 'bg-primary/10 text-primary' : 'text-on-surface'
+                          }`}
+                        >
+                          <span className="font-medium truncate">{route.id}</span>
+                          <span className="text-xs text-on-surface-variant">{route.vehicle_id || 'No vehicle'}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
             <p className="text-on-surface-variant mt-2">
               Driver: <span className="text-on-surface font-semibold">Unknown</span> • 
               Vehicle: <span className="text-on-surface font-semibold">{vehicleId}</span>
@@ -224,35 +307,96 @@ export default function ReportsView() {
           <div className="bg-surface-container-high/50 p-6 rounded-2xl border border-outline-variant/10">
             <h3 className="text-on-surface font-headline text-lg font-bold mb-5">Export Options</h3>
             <div className="grid grid-cols-2 gap-3">
-              <ExportButton icon={FileText} label="PDF Report" color="text-error" />
-              <ExportButton icon={Table} label="Excel File" color="text-on-tertiary-container" />
-              <ExportButton icon={Database} label="Raw JSON" color="text-primary" />
-              <ExportButton icon={Copy} label="Copy Link" color="text-secondary" />
+              <ExportButton
+                icon={FileText}
+                label={isExporting === 'pdf' ? 'Exporting...' : 'PDF Report'}
+                color={isExporting === 'pdf' ? 'text-outline' : 'text-error'}
+                onClick={() => handleExport('pdf')}
+                disabled={isExporting === 'pdf' || routeId === 'N/A'}
+                isLoading={isExporting === 'pdf'}
+              />
+              <ExportButton
+                icon={Table}
+                label={isExporting === 'excel' ? 'Exporting...' : 'Excel File'}
+                color={isExporting === 'excel' ? 'text-outline' : 'text-on-tertiary-container'}
+                onClick={() => handleExport('xlsx')}
+                disabled={isExporting === 'excel' || routeId === 'N/A'}
+                isLoading={isExporting === 'excel'}
+              />
+              <ExportButton
+                icon={Database}
+                label={isExporting === 'json' ? 'Exporting...' : 'Raw JSON'}
+                color={isExporting === 'json' ? 'text-outline' : 'text-primary'}
+                onClick={() => handleExport('json')}
+                disabled={isExporting === 'json' || routeId === 'N/A'}
+                isLoading={isExporting === 'json'}
+              />
+              <ExportButton
+                icon={Copy}
+                label="Copy Link"
+                color="text-secondary"
+                onClick={handleCopyLink}
+                disabled={routeId === 'N/A'}
+              />
             </div>
           </div>
 
-          {/* Map Placeholder */}
+          {/* Live Map with Route Stops */}
           <div className="rounded-2xl overflow-hidden h-64 relative shadow-lg border-2 border-surface-container-lowest">
-            <div 
-              className="absolute inset-0 bg-surface-container-highest bg-cover bg-center" 
-              style={{ backgroundImage: "url('https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=1000')" }}
-            >
-              <div className="absolute inset-0 bg-primary/10 mix-blend-multiply"></div>
-            </div>
+            <ProviderMap
+              className="absolute inset-0 h-full w-full"
+              center={mapCenter}
+              markers={mapMarkers}
+            />
             <div className="absolute inset-0 p-4 pointer-events-none">
-              <div className="glass-panel px-4 py-2.5 rounded-xl inline-flex items-center gap-2.5 pointer-events-auto">
-                <span className="w-2.5 h-2.5 rounded-full bg-error animate-pulse"></span>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface">Real-time Map Preview</span>
+              <div className="glass-panel px-4 py-2.5 rounded-xl inline-flex items-center gap-2.5 pointer-events-auto bg-surface-container-lowest/80">
+                <MapPin size={12} className="text-primary" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface">{stops.length} Stops</span>
               </div>
             </div>
-            <button className="absolute bottom-4 right-4 w-12 h-12 glass-panel rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-110 text-on-surface">
-              <ExternalLink size={20} />
-            </button>
           </div>
         </div>
       </div>
     </div>
   );
+
+  // Export handler
+  async function handleExport(format: 'pdf' | 'xlsx' | 'json') {
+    if (routeId === 'N/A') return;
+
+    setIsExporting(format);
+    try {
+      const blob = await api.exportRoute(routeId, format);
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `route-${routeId}.${format === 'xlsx' ? 'xlsx' : format}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export failed:', error);
+      window.alert(`Failed to export ${format.toUpperCase()}. Please try again.`);
+    } finally {
+      setIsExporting(null);
+    }
+  }
+
+  // Copy link handler
+  function handleCopyLink() {
+    if (routeId === 'N/A') return;
+
+    const url = `${window.location.origin}/routes/${routeId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      window.alert('Route link copied to clipboard!');
+    }).catch(() => {
+      window.alert('Failed to copy link.');
+    });
+  }
+
 }
 
 function TimelineRow({ num, name, desc, arrival, qty, qtyStyle, dist, highlightRow }: any) {
@@ -278,11 +422,20 @@ function TimelineRow({ num, name, desc, arrival, qty, qtyStyle, dist, highlightR
   );
 }
 
-function ExportButton({ icon: Icon, label, color }: any) {
+function ExportButton({ icon: Icon, label, color, onClick, disabled, isLoading }: any) {
   return (
-    <button className="flex flex-col items-center justify-center p-5 bg-surface-container-lowest rounded-xl border border-outline-variant/20 transition-all hover:bg-surface-bright hover:border-primary/30 group">
-      <Icon size={24} className={`${color} mb-3 group-hover:scale-110 transition-transform`} />
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex flex-col items-center justify-center p-5 bg-surface-container-lowest rounded-xl border border-outline-variant/20 transition-all hover:bg-surface-bright hover:border-primary/30 group disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {isLoading ? (
+        <Loader2 size={24} className={`${color} mb-3 animate-spin`} />
+      ) : (
+        <Icon size={24} className={`${color} mb-3 group-hover:scale-110 transition-transform`} />
+      )}
       <span className="text-xs font-bold text-on-surface">{label}</span>
     </button>
   );
 }
+

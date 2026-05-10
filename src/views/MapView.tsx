@@ -1,15 +1,24 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Search, Bell, Settings, Info, RefreshCw, Truck, Zap, GripVertical, CheckCircle2, X, Trash2, ChevronDown, AlertCircle, Clock } from 'lucide-react';
+import { Search, Bell, Settings, Info, RefreshCw, Truck, Zap, GripVertical, CheckCircle2, X, Trash2, ChevronDown, AlertCircle, Clock, FileDown, Loader2 } from 'lucide-react';
 import api from '../api';
 import ProviderMap from '../components/ProviderMap';
 import { mapProvider, type MapMarker } from '../api/mapProvider';
 
 export default function MapView() {
   const [routes, setRoutes] = useState<any[]>([]);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
   const [dispatched, setDispatched] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Re-optimize state
+  const [isReoptimizing, setIsReoptimizing] = useState(false);
+  const [optimizeMessage, setOptimizeMessage] = useState('');
+  const [currentJob, setCurrentJob] = useState<any>(null);
+
+  // Export state
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
 
   // Delete route state
   const [deletingRoute, setDeletingRoute] = useState<{ id: string; name: string } | null>(null);
@@ -261,10 +270,31 @@ export default function MapView() {
                 <Info className="text-on-surface-variant cursor-pointer" size={20} />
               </div>
             </div>
-            <button className="w-full flex items-center justify-center gap-3 primary-gradient text-on-primary py-3.5 rounded-xl font-headline font-bold text-sm tracking-wide shadow-lg hover:shadow-primary/20 transition-all active:scale-[0.98]">
-              <RefreshCw size={18} />
-              RE-CALCULATE ROUTES
+            <button
+              onClick={handleReoptimize}
+              disabled={isReoptimizing || routes.length === 0}
+              className="w-full flex items-center justify-center gap-3 primary-gradient text-on-primary py-3.5 rounded-xl font-headline font-bold text-sm tracking-wide shadow-lg hover:shadow-primary/20 transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isReoptimizing ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  OPTIMIZING...
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={18} />
+                  RE-CALCULATE ROUTES
+                </>
+              )}
             </button>
+            {optimizeMessage && (
+              <div className="text-xs text-on-surface-variant bg-surface-container-low rounded-lg px-3 py-2 flex items-center gap-2">
+                {currentJob?.status === 'calculating' && <Loader2 size={12} className="animate-spin text-primary" />}
+                {currentJob?.status === 'completed' && <CheckCircle2 size={12} className="text-success" />}
+                {currentJob?.status === 'failed' && <AlertCircle size={12} className="text-error" />}
+                <span>{optimizeMessage}</span>
+              </div>
+            )}
           </div>
 
           <div className="h-px bg-outline-variant/10 mx-6"></div>
@@ -408,8 +438,22 @@ export default function MapView() {
               <div className="h-full bg-primary rounded-full absolute left-0" style={{ width: `${routes.length > 0 ? 75 : 0}%` }}></div>
             </div>
             <div className="flex gap-4">
-              <button className="flex-1 py-3.5 rounded-xl bg-surface-container text-on-surface text-sm font-bold hover:bg-surface-container-high transition-colors">
-                Export PDF
+              <button
+                onClick={handleExportPDF}
+                disabled={isExportingPDF || routes.length === 0}
+                className="flex-1 py-3.5 rounded-xl bg-surface-container text-on-surface text-sm font-bold hover:bg-surface-container-high transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {isExportingPDF ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Exporting...
+                  </>
+                ) : (
+                  <>
+                    <FileDown size={16} />
+                    Export PDF
+                  </>
+                )}
               </button>
               <button
                 onClick={() => setShowDispatchModal(true)}
@@ -494,4 +538,101 @@ export default function MapView() {
       )}
     </div>
   );
+
+  // Re-optimize all routes
+  async function handleReoptimize() {
+    if (routes.length === 0) return;
+
+    try {
+      setIsReoptimizing(true);
+      setOptimizeMessage('Sending optimization request...');
+
+      const vehicleIds = [...new Set(routes.map(r => r.vehicle))].filter(v => v !== 'Unknown');
+      const allStops = routes.flatMap(r => r.stops);
+
+      if (vehicleIds.length === 0 || allStops.length === 0) {
+        setOptimizeMessage('No vehicles or stops available to optimize.');
+        setIsReoptimizing(false);
+        return;
+      }
+
+      const runRes = await api.runOptimizer({
+        project_id: `vrp-${Date.now()}`,
+        solver_algorithm: 'nearest_neighbor',
+        objective: 'minimize_distance',
+        vehicles: vehicleIds,
+        locations: allStops.map((s: any) => s.id),
+        constraints: {
+          max_vehicles: null,
+          max_route_distance_km: null,
+          max_route_duration_mins: null,
+          allow_overload: false,
+        },
+      });
+
+      setCurrentJob({ job_id: runRes.job_id, status: 'calculating' });
+      setOptimizeMessage('Calculating optimal routes...');
+
+      // Poll for job completion
+      const pollInterval = setInterval(async () => {
+        try {
+          const job = await api.getOptimizationJob(runRes.job_id);
+          setCurrentJob(job);
+
+          if (job.status === 'completed') {
+            clearInterval(pollInterval);
+            setOptimizeMessage('Optimization complete! Refreshing routes...');
+            await loadRoutes();
+            setOptimizeMessage('Routes updated successfully!');
+            setTimeout(() => setOptimizeMessage(''), 3000);
+            setIsReoptimizing(false);
+          } else if (job.status === 'failed' || job.status === 'cancelled') {
+            clearInterval(pollInterval);
+            setOptimizeMessage(`Optimization ${job.status}. Please try again.`);
+            setIsReoptimizing(false);
+          }
+        } catch (error) {
+          clearInterval(pollInterval);
+          setOptimizeMessage('Error checking optimization status.');
+          setIsReoptimizing(false);
+        }
+      }, 2000);
+
+    } catch (error) {
+      console.error(error);
+      setOptimizeMessage('Failed to start optimization.');
+      setIsReoptimizing(false);
+    }
+  }
+
+  // Export selected route to PDF
+  async function handleExportPDF() {
+    if (routes.length === 0) return;
+
+    // If a route is selected in the menu, export that one, otherwise export the first route
+    const routeToExport = openMenuId ? routes.find(r => r.id === openMenuId) : routes[0];
+    if (!routeToExport) return;
+
+    try {
+      setIsExportingPDF(true);
+      const blob = await api.exportRoute(routeToExport.id, 'pdf');
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `route-${routeToExport.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      setOpenMenuId(null);
+    } catch (error) {
+      console.error('Export failed:', error);
+      window.alert('Failed to export PDF. Please try again.');
+    } finally {
+      setIsExportingPDF(false);
+    }
+  }
 }
