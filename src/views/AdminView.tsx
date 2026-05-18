@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Shield, Users, Truck, Key, Search, Plus, Edit2, Trash2, Mail, CheckCircle2, MapPin, X, Eye, Zap, Calendar } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../api';
@@ -78,7 +79,15 @@ type ModalType = { type: 'create-driver' | 'edit-driver' | 'create-vehicle' | 'e
 type DeleteState = { entity: 'driver' | 'vehicle' | 'depot'; id: string; name: string } | null;
 
 export default function AdminView() {
-  const [activeTab, setActiveTab] = useState('drivers');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const validTabs = ['drivers', 'fleet', 'depots', 'api'];
+  const tabFromUrl = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(validTabs.includes(tabFromUrl ?? '') ? tabFromUrl! : 'drivers');
+
+  const switchTab = (tab: string) => {
+    setActiveTab(tab);
+    setSearchParams({ tab }, { replace: true });
+  };
   const [modal, setModal] = useState<ModalType>(null);
   const [deleteState, setDeleteState] = useState<DeleteState>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -122,10 +131,10 @@ export default function AdminView() {
       </div>
 
       <div className="flex items-center gap-2 mb-8 border-b border-outline-variant/20 shrink-0">
-        <TabButton active={activeTab === 'drivers'} onClick={() => setActiveTab('drivers')} icon={Users} label="Drivers" />
-        <TabButton active={activeTab === 'fleet'} onClick={() => setActiveTab('fleet')} icon={Truck} label="Fleet Database" />
-        <TabButton active={activeTab === 'depots'} onClick={() => setActiveTab('depots')} icon={MapPin} label="Depots & Hubs" />
-        <TabButton active={activeTab === 'api'} onClick={() => setActiveTab('api')} icon={Key} label="API Keys" />
+        <TabButton active={activeTab === 'drivers'} onClick={() => switchTab('drivers')} icon={Users} label="Drivers" />
+        <TabButton active={activeTab === 'fleet'} onClick={() => switchTab('fleet')} icon={Truck} label="Fleet Database" />
+        <TabButton active={activeTab === 'depots'} onClick={() => switchTab('depots')} icon={MapPin} label="Depots & Hubs" />
+        <TabButton active={activeTab === 'api'} onClick={() => switchTab('api')} icon={Key} label="API Keys" />
       </div>
 
       <div className="flex-1 flex flex-col overflow-hidden bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-sm relative">
@@ -444,9 +453,10 @@ function DepotForm({ initial, onClose, onCreated }: { initial?: any; onClose: ()
     try {
       const payload = {
         name: form.name,
+        address: form.address || undefined,
         coordinates: {
-          lat: parseFloat(form.lat) || 0,
-          lng: parseFloat(form.lng) || 0,
+          lat: parseFloat(String(form.lat)) || 0,
+          lng: parseFloat(String(form.lng)) || 0,
         },
       };
       if (isEdit) {
@@ -581,7 +591,7 @@ function DepotsTable({ depotsData, onEdit, onDelete }: { depotsData: any[]; onEd
   return (
     <table className="w-full text-left text-sm whitespace-nowrap">
       <thead className="bg-surface-container-low/50 sticky top-0 z-10 font-bold text-on-surface-variant uppercase text-xs tracking-wider border-b border-outline-variant/10">
-        <tr><th className="px-6 py-4">Depot ID / Name</th><th className="px-6 py-4">Coordinates</th><th className="px-6 py-4">Type</th><th className="px-6 py-4 text-right">Actions</th></tr>
+        <tr><th className="px-6 py-4">Depot ID / Name</th><th className="px-6 py-4">Address</th><th className="px-6 py-4">Coordinates</th><th className="px-6 py-4 text-right">Actions</th></tr>
       </thead>
       <tbody className="divide-y divide-outline-variant/10">
         {depotsData.length === 0
@@ -589,8 +599,8 @@ function DepotsTable({ depotsData, onEdit, onDelete }: { depotsData: any[]; onEd
           : depotsData.map(d => (
             <tr key={d.id} className="hover:bg-surface-container-low/50 transition-colors group">
               <td className="px-6 py-4"><p className="font-bold text-on-surface">{d.name}</p><p className="font-mono text-[11px] text-outline mt-0.5">{d.id}</p></td>
+              <td className="px-6 py-4 max-w-xs"><p className="text-sm text-on-surface-variant truncate">{d.address || <span className="italic text-outline text-xs">No address</span>}</p></td>
               <td className="px-6 py-4"><span className="font-mono text-xs text-primary bg-primary/5 px-2 py-1 rounded">{d.coordinates?.lat?.toFixed(5) ?? 0}, {d.coordinates?.lng?.toFixed(5) ?? 0}</span></td>
-              <td className="px-6 py-4"><span className="font-bold text-on-surface bg-surface-container px-3 py-1 rounded-lg text-[11px] uppercase tracking-wider">Hub</span></td>
               <td className="px-6 py-4 text-right"><ActionBtns onEdit={() => onEdit(d)} onDelete={() => onDelete(d)} /></td>
             </tr>
           ))

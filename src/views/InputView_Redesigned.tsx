@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Upload, Plus, Edit2, Trash2, ChevronLeft, ChevronRight, Map, AlertTriangle, Settings2, MessageSquare, Route, X, FileSpreadsheet, MapPin, Zap, Play, Pause, Square, RefreshCw, BarChart3, Clock, Users, TrendingUp, Settings, CheckCircle, AlertCircle, Navigation, Calendar, Filter, Download, Eye } from 'lucide-react';
+import { Truck, Upload, Plus, Edit2, Trash2, ChevronLeft, ChevronRight, Map, AlertTriangle, Settings2, MessageSquare, Route, X, FileSpreadsheet, MapPin, Zap, Play, Pause, Square, RefreshCw, BarChart3, Clock, Users, TrendingUp, Settings, CheckCircle, AlertCircle, Navigation, Calendar, Filter, Download, Eye, ExternalLink } from 'lucide-react';
 import api from '../api';
 
 // Generate ID: 3 letters + 3 numbers (e.g. ABC-123)
@@ -49,6 +49,7 @@ export default function InputView() {
   const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [selectedGmapUrl, setSelectedGmapUrl] = useState<string | null>(null);
   
   // Optimization Jobs State
   const [optimizationJobs, setOptimizationJobs] = useState<any[]>([]);
@@ -178,6 +179,7 @@ export default function InputView() {
       lat: suggestion.lat.toString(),
       lng: suggestion.lng.toString(),
     }));
+    setSelectedGmapUrl(suggestion.gmap_url ?? null);
     setShowSuggestions(false);
     setAddressSuggestions([]);
   };
@@ -1028,23 +1030,51 @@ export default function InputView() {
                     placeholder="e.g. 10 Downing St, London" 
                     required 
                     value={pointForm.address} 
-                    onChange={e => handleAddressChange(e.target.value)}
+                    onChange={e => { handleAddressChange(e.target.value); setSelectedGmapUrl(null); }}
                     onFocus={() => setShowSuggestions(addressSuggestions.length > 0)}
                     className="mt-1 w-full h-10 bg-surface-container-low rounded-lg pl-3 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" 
                   />
-                  <MapPin size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-outline" />
+                  {selectedGmapUrl ? (
+                    <a
+                      href={selectedGmapUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-primary hover:text-primary/70 transition-colors"
+                      title="Xem trên Google Maps"
+                    >
+                      <ExternalLink size={16} />
+                    </a>
+                  ) : (
+                    <MapPin size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-outline" />
+                  )}
                   {showSuggestions && addressSuggestions.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
                       {addressSuggestions.map((suggestion, index) => (
-                        <button
+                        <div
                           key={suggestion.place_id || index}
-                          type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-surface-container-low transition-colors border-b border-outline-variant/10 last:border-b-0"
-                          onClick={() => handleSelectAddress(suggestion)}
+                          className="flex items-center gap-2 border-b border-outline-variant/10 last:border-b-0 hover:bg-surface-container-low transition-colors"
                         >
-                          <div className="font-medium text-on-surface">{suggestion.display_name}</div>
-                          <div className="text-xs text-on-surface-variant mt-0.5">{suggestion.address}</div>
-                        </button>
+                          <button
+                            type="button"
+                            className="flex-1 text-left px-3 py-2 text-sm"
+                            onClick={() => handleSelectAddress(suggestion)}
+                          >
+                            <div className="font-medium text-on-surface">{suggestion.display_name}</div>
+                            <div className="text-xs text-on-surface-variant mt-0.5">{suggestion.address}</div>
+                          </button>
+                          {suggestion.gmap_url && (
+                            <a
+                              href={suggestion.gmap_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-shrink-0 pr-3 text-primary hover:text-primary/70 transition-colors"
+                              title="Xem trên Google Maps"
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <ExternalLink size={14} />
+                            </a>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}

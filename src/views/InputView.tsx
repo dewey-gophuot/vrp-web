@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Upload, Plus, Edit2, Trash2, ChevronLeft, ChevronRight, Map, AlertTriangle, Settings2, MessageSquare, Route, X, FileSpreadsheet, MapPin, Zap, Play, Pause, Square, RefreshCw, BarChart3, Clock, Users, TrendingUp, Settings, CheckCircle, AlertCircle, Navigation, Calendar, Filter, Download, Eye } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Truck, Upload, Plus, Edit2, Trash2, ChevronLeft, ChevronRight, Map as MapIcon, AlertTriangle, Settings2, MessageSquare, Route, X, FileSpreadsheet, MapPin, Zap, Play, Pause, Square, RefreshCw, BarChart3, Clock, Users, TrendingUp, Settings, CheckCircle, AlertCircle, Navigation, Calendar, Filter, Download, Eye, ExternalLink } from 'lucide-react';
 import api from '../api';
 
 // Generate ID: 3 letters + 3 numbers (e.g. ABC-123)
@@ -20,6 +21,8 @@ function generateId(): string {
 }
 
 export default function InputView() {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showAddPoint, setShowAddPoint] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -49,6 +52,7 @@ export default function InputView() {
   const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [selectedGmapUrl, setSelectedGmapUrl] = useState<string | null>(null);
   
   // Optimization Jobs State
   const [optimizationJobs, setOptimizationJobs] = useState<any[]>([]);
@@ -59,12 +63,36 @@ export default function InputView() {
   const [routes, setRoutes] = useState<any[]>([]);
   const [activeRoutes, setActiveRoutes] = useState<any[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<any | null>(null);
+  const [deletingRouteId, setDeletingRouteId] = useState<string | null>(null);
+  const [isDeletingRoute, setIsDeletingRoute] = useState(false);
   
   // Metrics State
   const [metrics, setMetrics] = useState<any>(null);
   
-  // UI State
-  const [activeTab, setActiveTab] = useState<'setup' | 'optimize' | 'routes' | 'tracking'>('setup');
+  // Optimize stepper state — sync với URL ?step=
+  const stepFromUrl = parseInt(searchParams.get('step') || '1') as 1 | 2 | 3 | 4 | 5 | 6;
+  const [optimizeStep, setOptimizeStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(
+    stepFromUrl >= 1 && stepFromUrl <= 4 ? stepFromUrl : 1
+  );
+  const [depots, setDepots] = useState<any[]>([]);
+  const [selectedDepotId, setSelectedDepotId] = useState<string | null>(null);
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
+
+  // UI State — sync với URL ?tab=
+  const tabFromUrl = searchParams.get('tab') as 'setup' | 'optimize' | 'routes' | 'tracking' | null;
+  const [activeTab, setActiveTab] = useState<'setup' | 'optimize' | 'routes' | 'tracking'>(tabFromUrl ?? 'setup');
+
+  useEffect(() => {
+    const t = searchParams.get('tab') as 'setup' | 'optimize' | 'routes' | 'tracking' | null;
+    if (t && t !== activeTab) setActiveTab(t);
+    const s = parseInt(searchParams.get('step') || '0');
+    if (s >= 1 && s <= 4 && s !== optimizeStep) setOptimizeStep(s as 1 | 2 | 3 | 4 | 5 | 6);
+  }, [searchParams]);
+
+  const goToStep = (step: 1 | 2 | 3 | 4 | 5 | 6) => {
+    setOptimizeStep(step);
+    setSearchParams({ tab: 'optimize', step: String(step) }, { replace: true });
+  };
   const [showOptimizeSettings, setShowOptimizeSettings] = useState(false);
   const [optimizeSettings, setOptimizeSettings] = useState({
     solver_algorithm: 'nearest_neighbor',
@@ -83,6 +111,10 @@ export default function InputView() {
         setLocations(locationRes || []);
       })
       .catch(console.error);
+  };
+
+  const loadDepots = () => {
+    api.listDepots().then(setDepots).catch(console.error);
   };
 
   const loadMetrics = () => {
@@ -114,6 +146,7 @@ export default function InputView() {
           if (job.status === 'completed') {
             loadRoutes();
             loadMetrics();
+            setOptimizeStep(6);
           }
         }
       } catch (error) {
@@ -130,6 +163,7 @@ export default function InputView() {
     loadMetrics();
     loadRoutes();
     loadOptimizationJobs();
+    loadDepots();
     
     return () => {
       if (jobPolling) clearInterval(jobPolling);
@@ -178,6 +212,7 @@ export default function InputView() {
       lat: suggestion.lat.toString(),
       lng: suggestion.lng.toString(),
     }));
+    setSelectedGmapUrl(suggestion.gmap_url ?? null);
     setShowSuggestions(false);
     setAddressSuggestions([]);
   };
@@ -208,7 +243,7 @@ export default function InputView() {
   };
 
   const handleOptimize = async () => {
-    if (fleet.length === 0 || locations.length === 0) {
+    if (selectedVehicleIds.length === 0 || locations.length === 0) {
       setOptimizeMessage('Cần có ít nhất 1 xe và 1 điểm giao để tối ưu.');
       return;
     }
@@ -221,12 +256,13 @@ export default function InputView() {
         project_id: `vrp-${Date.now()}`,
         solver_algorithm: optimizeSettings.solver_algorithm,
         objective: optimizeSettings.objective,
-        vehicles: fleet.map(v => v.id),
+        vehicles: selectedVehicleIds,
         locations: locations.map(loc => loc.id),
         constraints: optimizeSettings.constraints,
       });
 
       setCurrentJob({ job_id: runRes.job_id, status: 'calculating' });
+      setOptimizeStep(5);
       pollJobStatus(runRes.job_id);
       setOptimizeMessage('Đang tính toán lộ trình tối ưu...');
     } catch (error) {
@@ -278,6 +314,37 @@ export default function InputView() {
     }
   };
 
+  const handleDeleteRoute = async () => {
+    if (!deletingRouteId) return;
+    setIsDeletingRoute(true);
+    try {
+      await api.deleteRoute(deletingRouteId);
+      setDeletingRouteId(null);
+      loadRoutes();
+      loadMetrics();
+    } catch (error) {
+      console.error(error);
+      window.alert('Xóa lộ trình thất bại.');
+    } finally {
+      setIsDeletingRoute(false);
+    }
+  };
+
+  const handleExportRoute = async (routeId: string, format: 'json' | 'xlsx') => {
+    try {
+      const blob = await api.exportRoute(routeId, format);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `route-${routeId}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(error);
+      window.alert('Export thất bại.');
+    }
+  };
+
   const handleUploadManifest = async () => {
     if (!manifestFile) {
       window.alert('Vui lòng chọn file CSV/XLSX trước khi upload.');
@@ -314,6 +381,7 @@ export default function InputView() {
     event.preventDefault();
     if (!editingLoc?.id) return;
     if (!pointForm.name.trim()) { window.alert('Vui lòng nhập tên điểm giao.'); return; }
+    console.log('[DEBUG] Submit editLocation:', { id: editingLoc.id, lat: pointForm.lat, lng: pointForm.lng, address: pointForm.address });
     try {
       setIsSubmittingPoint(true);
       await api.updateLocation(editingLoc.id, {
@@ -328,10 +396,10 @@ export default function InputView() {
         priority: parseInt(pointForm.priority) || 1,
         phone: pointForm.phone || undefined,
       });
-      loadFleetAndLocations();
       setShowAddPoint(false);
       setEditingLoc(null);
       setPointForm({ id: '', name: '', address: '', lat: '', lng: '', demand: '', service_time: '15', time_window_start: '', time_window_end: '', priority: '1', phone: '' });
+      await loadFleetAndLocations();
     } catch (error) { console.error(error); window.alert('Cập nhật thất bại.'); }
     finally { setIsSubmittingPoint(false); }
   };
@@ -367,11 +435,16 @@ export default function InputView() {
             { id: 'setup', label: 'Setup', icon: Settings },
             { id: 'optimize', label: 'Optimize', icon: BarChart3 },
             { id: 'routes', label: 'Routes', icon: Route },
-            { id: 'tracking', label: 'Tracking', icon: Map },
+            { id: 'tracking', label: 'Tracking', icon: MapIcon },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setActiveTab(id as any)}
+              onClick={() => {
+              setActiveTab(id as any);
+              const params: Record<string, string> = { tab: id };
+              if (id === 'optimize') params.step = String(optimizeStep);
+              setSearchParams(params, { replace: true });
+            }}
               className={`flex items-center gap-2 py-4 border-b-2 transition-colors ${
                 activeTab === id
                   ? 'border-primary text-primary'
@@ -529,8 +602,8 @@ export default function InputView() {
                                       id: loc.id || '',
                                       name: loc.name || '',
                                       address: loc.address_string || loc.address || '',
-                                      lat: loc.lat?.toString() || '',
-                                      lng: loc.lng?.toString() || '',
+                                      lat: (loc.coordinates?.lat ?? loc.lat)?.toString() || '',
+                                      lng: (loc.coordinates?.lng ?? loc.lng)?.toString() || '',
                                       demand: loc.demand_kg?.toString() || loc.demand?.toString() || '',
                                       service_time: loc.service_time_mins?.toString() || '15',
                                       time_window_start: loc.time_window_start || '',
@@ -564,7 +637,7 @@ export default function InputView() {
               <div className="grid grid-cols-3 gap-6 shrink-0 pb-2">
                 <div className="col-span-2 relative h-32 rounded-2xl overflow-hidden shadow-sm bg-surface-container-high border border-outline-variant/10 flex items-center justify-between p-8">
                   <div className="flex items-center gap-4">
-                     <div className="p-4 bg-primary rounded-2xl text-on-primary shadow-lg shadow-primary/20"><Map size={24} /></div>
+                     <div className="p-4 bg-primary rounded-2xl text-on-primary shadow-lg shadow-primary/20"><MapIcon size={24} /></div>
                      <div>
                        <h4 className="font-bold text-on-surface text-lg">Geospatial Validation</h4>
                        <p className="text-on-surface-variant text-sm mt-1">Geocoding: {locations.length}/{locations.length} addresses mapped to coordinates.</p>
@@ -594,246 +667,469 @@ export default function InputView() {
           </div>
         )}
 
-        {activeTab === 'optimize' && (
-          <div className="flex h-full">
-            {/* Left Column: Optimization Settings */}
-            <aside className="w-[420px] border-r border-outline-variant/15 bg-surface-container-low flex flex-col p-8 overflow-y-auto shrink-0">
-              <div className="flex items-center gap-3 mb-8">
-                <BarChart3 className="text-primary" size={24} />
-                <h2 className="text-xl font-bold font-headline text-on-surface">Optimization Settings</h2>
+        {activeTab === 'optimize' && (() => {
+          const selectedDepot = depots.find(d => d.id === selectedDepotId);
+          const eligibleVehicles = fleet.filter(v => v.driver_id && v.depot_id === selectedDepotId);
+          const selectedVehicles = fleet.filter(v => selectedVehicleIds.includes(v.id));
+          const selectedCapacity = selectedVehicles.reduce((s, v) => s + (v.capacity_kg || 0), 0);
+          const capacityShortfall = totalDemand > selectedCapacity;
+          const token = localStorage.getItem('access_token') || '';
+
+          const STEPS = [
+            { n: 1, label: 'Điểm giao' },
+            { n: 2, label: 'Depot' },
+            { n: 3, label: 'Chọn xe' },
+            { n: 4, label: 'Thuật toán' },
+            { n: 5, label: 'Đang chạy' },
+            { n: 6, label: 'Kết quả' },
+          ];
+
+          return (
+            <div className="flex flex-col h-full overflow-hidden">
+              {/* Stepper header */}
+              <div className="shrink-0 px-10 pt-6 pb-4 bg-surface-container-low border-b border-outline-variant/15">
+                <div className="flex items-center gap-0">
+                  {STEPS.map((s, i) => (
+                    <React.Fragment key={s.n}>
+                      <div className="flex flex-col items-center gap-1">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
+                          optimizeStep > s.n ? 'bg-primary text-on-primary' :
+                          optimizeStep === s.n ? 'bg-primary text-on-primary ring-4 ring-primary/20' :
+                          'bg-surface-container text-on-surface-variant'
+                        }`}>
+                          {optimizeStep > s.n ? <CheckCircle size={14} /> : s.n}
+                        </div>
+                        <span className={`text-[10px] font-semibold whitespace-nowrap ${optimizeStep === s.n ? 'text-primary' : 'text-on-surface-variant'}`}>{s.label}</span>
+                      </div>
+                      {i < STEPS.length - 1 && (
+                        <div className={`flex-1 h-0.5 mx-1 mb-4 ${optimizeStep > s.n ? 'bg-primary' : 'bg-surface-container-high'}`} />
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
 
-              <div className="space-y-6">
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-semibold text-on-surface-variant">Solver Algorithm</label>
-                  <select 
-                    value={optimizeSettings.solver_algorithm}
-                    onChange={(e) => setOptimizeSettings(prev => ({ ...prev, solver_algorithm: e.target.value }))}
-                    className="w-full h-12 bg-surface-container-lowest border border-outline-variant/10 rounded-xl px-4 py-2 text-on-surface focus:ring-2 focus:ring-primary-fixed-dim outline-none"
-                  >
-                    <option value="nearest_neighbor">Nearest Neighbor</option>
-                    <option value="or-tools">Google OR-Tools</option>
-                    <option value="genetic">Genetic Algorithm</option>
-                  </select>
-                </div>
+              {/* Step content */}
+              <div className="flex-1 overflow-y-auto px-10 py-8">
 
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-semibold text-on-surface-variant">Objective</label>
-                  <select 
-                    value={optimizeSettings.objective}
-                    onChange={(e) => setOptimizeSettings(prev => ({ ...prev, objective: e.target.value }))}
-                    className="w-full h-12 bg-surface-container-lowest border border-outline-variant/10 rounded-xl px-4 py-2 text-on-surface focus:ring-2 focus:ring-primary-fixed-dim outline-none"
-                  >
-                    <option value="minimize_distance">Minimize Distance</option>
-                    <option value="minimize_time">Minimize Time</option>
-                    <option value="minimize_cost">Minimize Cost</option>
-                    <option value="balance_load">Balance Load</option>
-                  </select>
-                </div>
-
-                <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-on-surface-variant">Constraints</h3>
-                  
-                  <label className="flex items-center gap-3 cursor-pointer p-3 bg-surface-container-lowest rounded-lg border border-outline-variant/10 hover:bg-surface-container transition-colors">
-                    <input 
-                      type="checkbox" 
-                      checked={optimizeSettings.constraints.strict_time_windows}
-                      onChange={(e) => setOptimizeSettings(prev => ({
-                        ...prev,
-                        constraints: { ...prev.constraints, strict_time_windows: e.target.checked }
-                      }))}
-                      className="w-4 h-4 rounded accent-primary" 
-                    />
-                    <div className="flex items-center gap-2 text-sm font-medium text-on-surface">
-                      <Clock size={16} className="text-primary" /> Strict Time Windows
+                {/* ── BƯỚC 1: Điểm giao hàng ── */}
+                {optimizeStep === 1 && (
+                  <div className="max-w-2xl mx-auto">
+                    <h2 className="text-2xl font-bold font-headline text-on-surface mb-2">Điểm giao hàng</h2>
+                    <p className="text-on-surface-variant text-sm mb-6">Kiểm tra danh sách điểm giao trước khi tối ưu.</p>
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                      <div className="rounded-xl bg-surface-container-low border border-outline-variant/10 p-5 flex flex-col gap-1">
+                        <span className="text-xs font-bold text-on-surface-variant uppercase tracking-widest">Số điểm giao</span>
+                        <span className="text-3xl font-bold text-primary font-headline">{locations.length}</span>
+                      </div>
+                      <div className="rounded-xl bg-surface-container-low border border-outline-variant/10 p-5 flex flex-col gap-1">
+                        <span className="text-xs font-bold text-on-surface-variant uppercase tracking-widest">Tổng demand</span>
+                        <span className="text-3xl font-bold text-primary font-headline">{totalDemand} <span className="text-base font-medium opacity-60">kg</span></span>
+                      </div>
                     </div>
-                  </label>
-
-                  <label className="flex items-center gap-3 cursor-pointer p-3 bg-surface-container-lowest rounded-lg border border-outline-variant/10 hover:bg-surface-container transition-colors">
-                    <input 
-                      type="checkbox" 
-                      checked={optimizeSettings.constraints.respect_capacity}
-                      onChange={(e) => setOptimizeSettings(prev => ({
-                        ...prev,
-                        constraints: { ...prev.constraints, respect_capacity: e.target.checked }
-                      }))}
-                      className="w-4 h-4 rounded accent-primary" 
-                    />
-                    <div className="flex items-center gap-2 text-sm font-medium text-on-surface">
-                      <Truck size={16} className="text-primary" /> Respect Capacity
+                    {locations.length === 0 && (
+                      <div className="mb-6 p-4 rounded-xl bg-error/10 border border-error/20 flex items-center gap-3 text-error text-sm font-medium">
+                        <AlertTriangle size={18} className="shrink-0" />
+                        Chưa có điểm giao nào. Vui lòng thêm điểm ở tab Setup.
+                      </div>
+                    )}
+                    <div className="rounded-xl bg-surface-container-lowest border border-outline-variant/10 overflow-hidden mb-6">
+                      <table className="w-full border-collapse text-left">
+                        <thead className="bg-surface-container-low">
+                          <tr>
+                            <th className="px-4 py-3 text-xs font-bold text-outline uppercase tracking-wider">Tên</th>
+                            <th className="px-4 py-3 text-xs font-bold text-outline uppercase tracking-wider">Địa chỉ</th>
+                            <th className="px-4 py-3 text-xs font-bold text-outline uppercase tracking-wider">Demand (kg)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-outline-variant/10">
+                          {locations.length === 0 ? (
+                            <tr><td colSpan={3} className="px-4 py-3 text-sm text-on-surface-variant text-center">Không có dữ liệu</td></tr>
+                          ) : locations.map((loc, idx) => (
+                            <tr key={loc.id || idx} className="hover:bg-surface-container-low/50">
+                              <td className="px-4 py-3 text-sm font-semibold text-on-surface">{loc.name}</td>
+                              <td className="px-4 py-3 text-xs text-on-surface-variant max-w-xs truncate">{loc.address_string || loc.address || '—'}</td>
+                              <td className="px-4 py-3 text-sm font-mono">{loc.demand_kg || 0}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  </label>
-
-                  <label className="flex items-center gap-3 cursor-pointer p-3 bg-surface-container-lowest rounded-lg border border-outline-variant/10 hover:bg-surface-container transition-colors">
-                    <input 
-                      type="checkbox" 
-                      checked={optimizeSettings.constraints.avoid_tolls}
-                      onChange={(e) => setOptimizeSettings(prev => ({
-                        ...prev,
-                        constraints: { ...prev.constraints, avoid_tolls: e.target.checked }
-                      }))}
-                      className="w-4 h-4 rounded accent-primary" 
-                    />
-                    <div className="flex items-center gap-2 text-sm font-medium text-on-surface">
-                      <Navigation size={16} className="text-primary" /> Avoid Tolls
+                    <div className="flex justify-end">
+                      <button
+                        disabled={locations.length === 0}
+                        onClick={() => goToStep(2)}
+                        className="h-11 px-8 rounded-xl bg-primary text-on-primary font-bold text-sm flex items-center gap-2 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Tiếp theo <ChevronRight size={18} />
+                      </button>
                     </div>
-                  </label>
-                </div>
-              </div>
-
-              <div className="mt-auto pt-8 space-y-3">
-                <button 
-                  onClick={handleOptimize}
-                  disabled={isOverloaded || isOptimizing}
-                  className={`w-full h-12 rounded-xl font-bold text-sm shadow-sm transition-all flex items-center justify-center gap-2 ${
-                    isOverloaded || isOptimizing
-                      ? 'bg-surface-container text-on-surface-variant cursor-not-allowed opacity-50' 
-                      : 'primary-gradient text-on-primary active:scale-95'
-                  }`}
-                >
-                  {isOptimizing ? (
-                    <>
-                      <RefreshCw className="animate-spin" size={18} />
-                      Optimizing...
-                    </>
-                  ) : (
-                    <>
-                      <Play size={18} />
-                      Run Optimization
-                    </>
-                  )}
-                </button>
-
-                {currentJob && currentJob.status === 'calculating' && (
-                  <button 
-                    onClick={handleCancelJob}
-                    className="w-full h-12 rounded-xl bg-error text-white font-bold text-sm hover:bg-error/90 transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Square size={18} />
-                    Cancel Job
-                  </button>
-                )}
-              </div>
-            </aside>
-
-            {/* Right Column: Jobs History & Results */}
-            <section className="flex-1 flex flex-col p-10 overflow-hidden relative">
-              <div className="flex items-center justify-between mb-8 shrink-0">
-                <div>
-                  <h1 className="text-3xl font-bold font-headline text-on-surface tracking-tight">Optimization Jobs</h1>
-                  <p className="text-on-surface-variant text-sm mt-1">Job history and results</p>
-                </div>
-                <button 
-                  onClick={loadOptimizationJobs}
-                  className="h-10 px-5 rounded-xl bg-surface-container-highest border border-outline-variant/30 font-bold text-sm flex items-center gap-2 hover:bg-surface-variant transition-colors"
-                >
-                  <RefreshCw size={18} />
-                  Refresh
-                </button>
-              </div>
-
-              {/* Current Job Status */}
-              {currentJob && (
-                <div className="mb-6 p-6 rounded-xl border border-outline-variant/20 bg-surface-container-low">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-bold text-on-surface">Current Job</h3>
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      currentJob.status === 'calculating' ? 'bg-blue-100 text-blue-800' :
-                      currentJob.status === 'completed' ? 'bg-green-100 text-green-800' :
-                      currentJob.status === 'failed' ? 'bg-red-100 text-red-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}>
-                      {currentJob.status}
-                    </span>
                   </div>
-                  
-                  {currentJob.status === 'calculating' && (
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-on-surface-variant">Progress</span>
-                        <span className="font-medium">Calculating...</span>
+                )}
+
+                {/* ── BƯỚC 2: Chọn Depot ── */}
+                {optimizeStep === 2 && (
+                  <div className="max-w-2xl mx-auto">
+                    <h2 className="text-2xl font-bold font-headline text-on-surface mb-2">Chọn Depot</h2>
+                    <p className="text-on-surface-variant text-sm mb-6">Chọn kho xuất phát cho chuyến hàng này.</p>
+                    {depots.length === 0 ? (
+                      <div className="mb-6 space-y-4">
+                        <div className="p-4 rounded-xl bg-error/10 border border-error/20 flex items-start gap-3 text-error text-sm">
+                          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-semibold">Chưa có depot nào trong hệ thống.</p>
+                            <p className="text-error/80 mt-0.5">Bạn cần tạo ít nhất một depot trước khi tối ưu lộ trình.</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => navigate('/admin')}
+                          className="flex items-center gap-2 h-11 px-6 rounded-xl bg-primary text-on-primary font-bold text-sm hover:bg-primary/90 transition-colors"
+                        >
+                          <ExternalLink size={16} /> Đến trang Admin để tạo Depot
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 mb-6">
+                        {depots.map(depot => {
+                          const depotVehicles = fleet.filter(v => v.depot_id === depot.id);
+                          const isSelected = selectedDepotId === depot.id;
+                          return (
+                            <button
+                              key={depot.id}
+                              onClick={() => { setSelectedDepotId(depot.id); setSelectedVehicleIds([]); }}
+                              className={`w-full text-left p-5 rounded-xl border-2 transition-all ${
+                                isSelected
+                                  ? 'border-primary bg-primary/5'
+                                  : 'border-outline-variant/20 bg-surface-container-lowest hover:border-primary/40 hover:bg-surface-container-low'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <MapPin size={16} className={isSelected ? 'text-primary' : 'text-outline'} />
+                                    <span className="font-bold text-on-surface">{depot.name}</span>
+                                  </div>
+                                  <p className="text-xs text-on-surface-variant ml-6">{depot.address || `${depot.coordinates?.lat?.toFixed(4)}, ${depot.coordinates?.lng?.toFixed(4)}`}</p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className="text-xs bg-surface-container px-2 py-1 rounded-full font-medium text-on-surface-variant">
+                                    {depotVehicles.length} xe
+                                  </span>
+                                  {isSelected && <CheckCircle size={18} className="text-primary" />}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <button onClick={() => goToStep(1)} className="h-11 px-6 rounded-xl bg-surface-container-high font-bold text-sm flex items-center gap-2 hover:bg-surface-container-highest transition-colors">
+                        <ChevronLeft size={18} /> Quay lại
+                      </button>
+                      <button
+                        disabled={!selectedDepotId}
+                        onClick={() => goToStep(3)}
+                        className="h-11 px-8 rounded-xl bg-primary text-on-primary font-bold text-sm flex items-center gap-2 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Tiếp theo <ChevronRight size={18} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── BƯỚC 3: Chọn xe ── */}
+                {optimizeStep === 3 && (
+                  <div className="max-w-2xl mx-auto">
+                    <h2 className="text-2xl font-bold font-headline text-on-surface mb-2">Chọn xe</h2>
+                    <p className="text-on-surface-variant text-sm mb-1">Chỉ hiển thị xe có tài xế thuộc depot <span className="font-semibold text-on-surface">{selectedDepot?.name}</span>.</p>
+
+                    {/* Capacity bar */}
+                    <div className={`mb-5 p-4 rounded-xl border ${capacityShortfall && selectedVehicleIds.length > 0 ? 'bg-error/10 border-error/20' : 'bg-surface-container-low border-outline-variant/10'}`}>
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="font-semibold text-on-surface-variant">Capacity đã chọn / Tổng demand</span>
+                        <span className={`font-bold ${capacityShortfall && selectedVehicleIds.length > 0 ? 'text-error' : 'text-primary'}`}>
+                          {selectedCapacity} / {totalDemand} kg
+                        </span>
                       </div>
                       <div className="w-full h-2 bg-surface-container rounded-full overflow-hidden">
-                        <div className="h-full bg-primary rounded-full animate-pulse" style={{ width: '60%' }}></div>
+                        <div
+                          className={`h-full rounded-full transition-all ${capacityShortfall && selectedVehicleIds.length > 0 ? 'bg-error' : 'bg-primary'}`}
+                          style={{ width: `${Math.min(totalDemand > 0 ? (selectedCapacity / totalDemand) * 100 : 0, 100)}%` }}
+                        />
                       </div>
-                    </div>
-                  )}
-
-                  {currentJob.status === 'completed' && currentJob.result && (
-                    <div className="grid grid-cols-4 gap-4 mt-4">
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-primary">{currentJob.result.routes?.length || 0}</div>
-                        <div className="text-xs text-on-surface-variant">Routes</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-primary">{currentJob.result.total_distance_km || 0}</div>
-                        <div className="text-xs text-on-surface-variant">Distance (km)</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-primary">{currentJob.result.total_duration_mins || 0}</div>
-                        <div className="text-xs text-on-surface-variant">Duration (min)</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-primary">{currentJob.result.total_cost || 0}</div>
-                        <div className="text-xs text-on-surface-variant">Cost ($)</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Jobs History */}
-              <div className="flex-1 bg-surface-container-lowest rounded-2xl shadow-sm border border-outline-variant/10 flex flex-col overflow-hidden">
-                <div className="overflow-y-auto flex-1">
-                  <table className="w-full border-collapse text-left">
-                    <thead className="sticky top-0 bg-surface-container-low z-10">
-                      <tr>
-                        <th className="px-6 py-4 text-xs font-bold text-outline uppercase tracking-wider">Job ID</th>
-                        <th className="px-6 py-4 text-xs font-bold text-outline uppercase tracking-wider">Algorithm</th>
-                        <th className="px-6 py-4 text-xs font-bold text-outline uppercase tracking-wider">Status</th>
-                        <th className="px-6 py-4 text-xs font-bold text-outline uppercase tracking-wider">Result</th>
-                        <th className="px-6 py-4 text-xs font-bold text-outline uppercase tracking-wider">Created</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-outline-variant/10">
-                      {optimizationJobs.length === 0 ? (
-                        <tr><td colSpan={5} className="px-6 py-4 text-center text-sm text-on-surface-variant">No optimization jobs found.</td></tr>
-                      ) : (
-                        optimizationJobs.map((job) => (
-                          <tr key={job.job_id} className="hover:bg-surface-container-low transition-colors">
-                            <td className="px-6 py-5 font-mono text-sm">{job.job_id}</td>
-                            <td className="px-6 py-5 text-sm">{job.solver_algorithm}</td>
-                            <td className="px-6 py-5">
-                              <span className={`px-3 py-1.5 rounded-full text-[11px] font-bold ${
-                                job.status === 'calculating' ? 'bg-blue-100 text-blue-800' :
-                                job.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                job.status === 'failed' ? 'bg-red-100 text-red-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                                {job.status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-5 text-sm">
-                              {job.result ? `${job.result.routes?.length || 0} routes` : '-'}
-                            </td>
-                            <td className="px-6 py-5 text-sm text-on-surface-variant">
-                              {new Date(job.created_at).toLocaleString()}
-                            </td>
-                          </tr>
-                        ))
+                      {capacityShortfall && selectedVehicleIds.length > 0 && (
+                        <p className="text-xs text-error mt-2 font-medium">Cảnh báo: Tổng capacity xe chưa đủ để giao hết hàng.</p>
                       )}
-                    </tbody>
-                  </table>
-                </div>
+                    </div>
+
+                    {eligibleVehicles.length === 0 ? (
+                      <div className="mb-6 space-y-4">
+                        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3 text-amber-700 text-sm">
+                          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-semibold">Không có xe nào sẵn sàng tại depot này.</p>
+                            <p className="text-amber-600 mt-0.5">Chỉ hiển thị xe đã được gán tài xế. Vui lòng cấu hình xe và tài xế ở trang Admin.</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => navigate('/admin')}
+                          className="flex items-center gap-2 h-11 px-6 rounded-xl bg-primary text-on-primary font-bold text-sm hover:bg-primary/90 transition-colors"
+                        >
+                          <ExternalLink size={16} /> Đến trang Admin để cấu hình xe
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 mb-6">
+                        {eligibleVehicles.map(v => {
+                          const isChecked = selectedVehicleIds.includes(v.id);
+                          return (
+                            <label
+                              key={v.id}
+                              className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                                isChecked
+                                  ? 'border-primary bg-primary/5'
+                                  : 'border-outline-variant/20 bg-surface-container-lowest hover:border-primary/30 hover:bg-surface-container-low'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => setSelectedVehicleIds(prev =>
+                                  prev.includes(v.id) ? prev.filter(id => id !== v.id) : [...prev, v.id]
+                                )}
+                                className="mt-1 w-4 h-4 rounded accent-primary shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <Truck size={15} className={isChecked ? 'text-primary' : 'text-outline'} />
+                                  <span className="font-bold text-sm text-on-surface">{v.name || v.id}</span>
+                                  <span className="text-xs font-mono text-on-surface-variant bg-surface-container px-2 py-0.5 rounded">{v.license_plate || '—'}</span>
+                                </div>
+                                <div className="flex gap-4 text-xs text-on-surface-variant ml-5">
+                                  <span>Tải trọng: <b className="text-on-surface">{v.capacity_kg || 0} kg</b></span>
+                                  <span>Tài xế: <b className="text-on-surface">{v.driver_name || v.driver_id}</b></span>
+                                  <span className={`font-bold ${v.status === 'available' ? 'text-green-600' : 'text-amber-600'}`}>{v.status}</span>
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="flex justify-between">
+                      <button onClick={() => goToStep(2)} className="h-11 px-6 rounded-xl bg-surface-container-high font-bold text-sm flex items-center gap-2 hover:bg-surface-container-highest transition-colors">
+                        <ChevronLeft size={18} /> Quay lại
+                      </button>
+                      <button
+                        disabled={selectedVehicleIds.length === 0}
+                        onClick={() => goToStep(4)}
+                        className="h-11 px-8 rounded-xl bg-primary text-on-primary font-bold text-sm flex items-center gap-2 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Tiếp theo <ChevronRight size={18} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── BƯỚC 4: Cài đặt thuật toán ── */}
+                {optimizeStep === 4 && (
+                  <div className="max-w-2xl mx-auto">
+                    <h2 className="text-2xl font-bold font-headline text-on-surface mb-2">Cài đặt thuật toán</h2>
+                    <p className="text-on-surface-variant text-sm mb-6">Chọn thuật toán và mục tiêu tối ưu.</p>
+                    <div className="space-y-5 mb-8">
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-semibold text-on-surface-variant">Thuật toán</label>
+                        <select
+                          value={optimizeSettings.solver_algorithm}
+                          onChange={(e) => setOptimizeSettings(prev => ({ ...prev, solver_algorithm: e.target.value }))}
+                          className="w-full h-12 bg-surface-container-lowest border border-outline-variant/10 rounded-xl px-4 text-on-surface focus:ring-2 focus:ring-primary/30 outline-none"
+                        >
+                          <option value="nearest_neighbor">Nearest Neighbor</option>
+                          <option value="genetic_algorithm">Genetic Algorithm</option>
+                          <option value="clarke_wright_savings">Clarke-Wright Savings</option>
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-semibold text-on-surface-variant">Mục tiêu</label>
+                        <select
+                          value={optimizeSettings.objective}
+                          onChange={(e) => setOptimizeSettings(prev => ({ ...prev, objective: e.target.value }))}
+                          className="w-full h-12 bg-surface-container-lowest border border-outline-variant/10 rounded-xl px-4 text-on-surface focus:ring-2 focus:ring-primary/30 outline-none"
+                        >
+                          <option value="minimize_distance">Minimize Distance</option>
+                          <option value="minimize_time">Minimize Time</option>
+                          <option value="minimize_cost">Minimize Cost</option>
+                        </select>
+                      </div>
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-semibold text-on-surface-variant">Ràng buộc</h3>
+                        {[
+                          { key: 'strict_time_windows', label: 'Strict Time Windows', icon: Clock },
+                          { key: 'respect_capacity', label: 'Respect Capacity', icon: Truck },
+                          { key: 'avoid_tolls', label: 'Avoid Tolls', icon: Navigation },
+                        ].map(({ key, label, icon: Icon }) => (
+                          <label key={key} className="flex items-center gap-3 cursor-pointer p-3 bg-surface-container-lowest rounded-lg border border-outline-variant/10 hover:bg-surface-container transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={(optimizeSettings.constraints as any)[key]}
+                              onChange={(e) => setOptimizeSettings(prev => ({
+                                ...prev,
+                                constraints: { ...prev.constraints, [key]: e.target.checked }
+                              }))}
+                              className="w-4 h-4 rounded accent-primary"
+                            />
+                            <div className="flex items-center gap-2 text-sm font-medium text-on-surface">
+                              <Icon size={15} className="text-primary" /> {label}
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex justify-between">
+                      <button onClick={() => goToStep(3)} className="h-11 px-6 rounded-xl bg-surface-container-high font-bold text-sm flex items-center gap-2 hover:bg-surface-container-highest transition-colors">
+                        <ChevronLeft size={18} /> Quay lại
+                      </button>
+                      <button
+                        onClick={handleOptimize}
+                        disabled={isOptimizing}
+                        className="h-11 px-8 rounded-xl bg-primary text-on-primary font-bold text-sm flex items-center gap-2 hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isOptimizing ? <><RefreshCw className="animate-spin" size={16} /> Đang gửi...</> : <><Play size={16} /> Chạy tối ưu</>}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── BƯỚC 5: Đang chạy ── */}
+                {optimizeStep === 5 && (
+                  <div className="max-w-xl mx-auto flex flex-col items-center text-center pt-10">
+                    <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-6">
+                      <RefreshCw size={36} className="text-primary animate-spin" />
+                    </div>
+                    <h2 className="text-2xl font-bold font-headline text-on-surface mb-2">Đang tối ưu lộ trình</h2>
+                    <p className="text-on-surface-variant text-sm mb-8">Hệ thống đang tính toán phân công lộ trình tối ưu nhất cho {selectedVehicleIds.length} xe và {locations.length} điểm giao...</p>
+                    <div className="w-full bg-surface-container rounded-full h-2 overflow-hidden mb-3">
+                      <div className="h-full bg-primary rounded-full animate-pulse" style={{ width: '65%' }} />
+                    </div>
+                    <p className="text-xs text-on-surface-variant mb-8">
+                      Job ID: <span className="font-mono">{currentJob?.job_id}</span>
+                    </p>
+                    {currentJob?.status === 'failed' && (
+                      <div className="w-full p-4 rounded-xl bg-error/10 border border-error/20 text-error text-sm font-medium flex items-center gap-2 mb-4">
+                        <AlertCircle size={16} /> Tối ưu thất bại. Vui lòng thử lại.
+                      </div>
+                    )}
+                    <div className="flex gap-3">
+                      {currentJob?.status === 'calculating' && (
+                        <button
+                          onClick={async () => { await handleCancelJob(); setOptimizeStep(4); }}
+                          className="h-10 px-6 rounded-xl bg-error text-white font-bold text-sm flex items-center gap-2 hover:bg-error/90 transition-colors"
+                        >
+                          <Square size={15} /> Hủy job
+                        </button>
+                      )}
+                      {currentJob?.status === 'failed' && (
+                        <button onClick={() => setOptimizeStep(4)} className="h-10 px-6 rounded-xl bg-surface-container-high font-bold text-sm flex items-center gap-2 hover:bg-surface-container-highest transition-colors">
+                          <ChevronLeft size={15} /> Thử lại
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── BƯỚC 6: Kết quả ── */}
+                {optimizeStep === 6 && currentJob && (
+                  <div className="max-w-3xl mx-auto">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                        <CheckCircle size={22} className="text-green-600" />
+                      </div>
+                      <div>
+                        <h2 className="text-2xl font-bold font-headline text-on-surface">Tối ưu hoàn tất!</h2>
+                        <p className="text-on-surface-variant text-sm">Job: <span className="font-mono">{currentJob.job_id}</span></p>
+                      </div>
+                    </div>
+
+                    {/* Summary cards */}
+                    <div className="grid grid-cols-4 gap-4 mb-6">
+                      {[
+                        { label: 'Lộ trình', value: currentJob.result?.routes?.length ?? 0, unit: '' },
+                        { label: 'Tổng km', value: currentJob.result?.total_distance_km ?? 0, unit: 'km' },
+                        { label: 'Thời gian', value: Math.round(currentJob.result?.total_duration_mins ?? 0), unit: 'phút' },
+                        { label: 'Chi phí', value: currentJob.result?.total_cost ?? 0, unit: '$' },
+                      ].map(c => (
+                        <div key={c.label} className="rounded-xl bg-surface-container-low border border-outline-variant/10 p-4 text-center">
+                          <div className="text-2xl font-bold text-primary font-headline">{c.value}<span className="text-sm font-medium opacity-60 ml-1">{c.unit}</span></div>
+                          <div className="text-xs text-on-surface-variant mt-1">{c.label}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Routes table */}
+                    {currentJob.result?.routes && currentJob.result.routes.length > 0 && (
+                      <div className="rounded-xl bg-surface-container-lowest border border-outline-variant/10 overflow-hidden mb-6">
+                        <table className="w-full border-collapse text-left">
+                          <thead className="bg-surface-container-low">
+                            <tr>
+                              <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Lộ trình</th>
+                              <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Xe</th>
+                              <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Stops</th>
+                              <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Km</th>
+                              <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Tải (kg)</th>
+                              <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Sử dụng</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-outline-variant/10">
+                            {currentJob.result.routes.map((r: any, idx: number) => (
+                              <tr key={r.route_id || idx} className="hover:bg-surface-container-low/50">
+                                <td className="px-4 py-3 font-mono text-xs text-primary">{r.route_id || `Route ${idx + 1}`}</td>
+                                <td className="px-4 py-3 text-sm font-medium">{r.vehicle_id}</td>
+                                <td className="px-4 py-3 text-sm">{r.stop_count}</td>
+                                <td className="px-4 py-3 text-sm font-mono">{r.distance_km ?? r.total_distance_km ?? 0}</td>
+                                <td className="px-4 py-3 text-sm font-mono">{r.load_kg}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${(r.utilization_pct || 0) > 90 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                                    {r.utilization_pct || 0}%
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-between">
+                      <button
+                        onClick={() => { setOptimizeStep(1); setSelectedDepotId(null); setSelectedVehicleIds([]); setCurrentJob(null); setIsOptimizing(false); }}
+                        className="h-11 px-6 rounded-xl bg-surface-container-high font-bold text-sm flex items-center gap-2 hover:bg-surface-container-highest transition-colors"
+                      >
+                        <RefreshCw size={16} /> Tối ưu mới
+                      </button>
+                      <a
+                        href={`http://localhost:8501?job_id=${currentJob.job_id}&token=${encodeURIComponent(token)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="h-11 px-8 rounded-xl bg-primary text-on-primary font-bold text-sm flex items-center gap-2 hover:bg-primary/90 transition-colors"
+                      >
+                        <ExternalLink size={16} /> Xem trực quan (Streamlit)
+                      </a>
+                    </div>
+                  </div>
+                )}
+
               </div>
-            </section>
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {activeTab === 'routes' && (
           <div className="flex h-full">
             {/* Routes List */}
-            <section className="flex-1 flex flex-col p-10 overflow-hidden relative">
+            <section className="flex-1 flex flex-col p-10 overflow-y-auto relative">
               <div className="flex items-center justify-between mb-8 shrink-0">
                 <div>
                   <h1 className="text-3xl font-bold font-headline text-on-surface tracking-tight">Routes Management</h1>
@@ -851,9 +1147,9 @@ export default function InputView() {
               </div>
 
               {/* Routes Grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 overflow-y-auto flex-1">
-                {[...routes, ...activeRoutes].map((route) => (
-                  <div key={route.id} className="bg-surface-container-lowest rounded-xl border border-outline-variant/10 overflow-hidden hover:shadow-lg transition-shadow">
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 content-start pb-4">
+                {(Array.from(new Map([...routes, ...activeRoutes].map(r => [r.id || r.route_id, r])).values()) as any[]).map((route) => (
+                  <div key={route.id || route.route_id} className="bg-surface-container-lowest rounded-xl border border-outline-variant/10 hover:shadow-lg transition-shadow">
                     <div className="p-6">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
@@ -911,17 +1207,46 @@ export default function InputView() {
                             <CheckCircle size={14} /> Complete
                           </button>
                         )}
-                        <button className="h-8 px-3 rounded-lg bg-surface-container text-xs font-medium hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => setSelectedRoute(route)}
+                          className="h-8 px-3 rounded-lg bg-surface-container text-xs font-medium hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1"
+                        >
                           <Eye size={14} /> View
                         </button>
-                        <button className="h-8 px-3 rounded-lg bg-surface-container text-xs font-medium hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => handleExportRoute(route.id || route.route_id, 'xlsx')}
+                          className="h-8 px-3 rounded-lg bg-surface-container text-xs font-medium hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1"
+                        >
                           <Download size={14} /> Export
+                        </button>
+                        <button
+                          onClick={() => setDeletingRouteId(route.id || route.route_id)}
+                          className="h-8 px-3 rounded-lg bg-error/10 text-error text-xs font-medium hover:bg-error/20 transition-colors flex items-center justify-center gap-1"
+                        >
+                          <Trash2 size={14} />
                         </button>
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
+
+              {/* Delete Route Confirm */}
+              {deletingRouteId && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-outline/20 backdrop-blur-sm">
+                  <div className="bg-surface-container-lowest rounded-2xl shadow-2xl p-8 text-center w-80">
+                    <Trash2 size={28} className="text-error mx-auto mb-3" />
+                    <h3 className="text-lg font-bold text-on-surface mb-2">Xóa lộ trình?</h3>
+                    <p className="text-sm text-on-surface-variant mb-6">Hành động này không thể hoàn tác.</p>
+                    <div className="flex gap-3">
+                      <button onClick={() => setDeletingRouteId(null)} className="flex-1 h-10 rounded-xl bg-surface-container font-bold text-sm">Hủy</button>
+                      <button onClick={handleDeleteRoute} disabled={isDeletingRoute} className="flex-1 h-10 rounded-xl bg-error text-white font-bold text-sm disabled:opacity-60">
+                        {isDeletingRoute ? 'Đang xóa...' : 'Xóa'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {routes.length === 0 && activeRoutes.length === 0 && (
                 <div className="flex-1 flex items-center justify-center">
@@ -1015,7 +1340,7 @@ export default function InputView() {
 
                       <div className="flex gap-2">
                         <button className="flex-1 h-8 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-1">
-                          <Map size={14} /> View Map
+                          <MapIcon size={14} /> View Map
                         </button>
                         <button className="h-8 px-3 rounded-lg bg-surface-container text-xs font-medium hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1">
                           <MessageSquare size={14} /> Contact
@@ -1029,7 +1354,7 @@ export default function InputView() {
               {activeRoutes.length === 0 && (
                 <div className="flex-1 flex items-center justify-center">
                   <div className="text-center">
-                    <Map className="mx-auto text-outline mb-4" size={48} />
+                    <MapIcon className="mx-auto text-outline mb-4" size={48} />
                     <h3 className="text-lg font-semibold text-on-surface mb-2">No Active Routes</h3>
                     <p className="text-sm text-on-surface-variant">Dispatch routes to start tracking.</p>
                   </div>
@@ -1079,23 +1404,51 @@ export default function InputView() {
                     placeholder="e.g. 10 Downing St, London" 
                     required 
                     value={pointForm.address} 
-                    onChange={e => handleAddressChange(e.target.value)}
+                    onChange={e => { handleAddressChange(e.target.value); setSelectedGmapUrl(null); }}
                     onFocus={() => setShowSuggestions(addressSuggestions.length > 0)}
                     className="mt-1 w-full h-10 bg-surface-container-low rounded-lg pl-3 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" 
                   />
-                  <MapPin size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-outline" />
+                  {selectedGmapUrl ? (
+                    <a
+                      href={selectedGmapUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-primary hover:text-primary/70 transition-colors"
+                      title="Xem trên Google Maps"
+                    >
+                      <ExternalLink size={16} />
+                    </a>
+                  ) : (
+                    <MapPin size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-outline" />
+                  )}
                   {showSuggestions && addressSuggestions.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-1 bg-surface-container-lowest border border-outline-variant/20 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
                       {addressSuggestions.map((suggestion, index) => (
-                        <button
+                        <div
                           key={suggestion.place_id || index}
-                          type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-surface-container-low transition-colors border-b border-outline-variant/10 last:border-b-0"
-                          onClick={() => handleSelectAddress(suggestion)}
+                          className="flex items-center gap-2 border-b border-outline-variant/10 last:border-b-0 hover:bg-surface-container-low transition-colors"
                         >
-                          <div className="font-medium text-on-surface">{suggestion.display_name}</div>
-                          <div className="text-xs text-on-surface-variant mt-0.5">{suggestion.address}</div>
-                        </button>
+                          <button
+                            type="button"
+                            className="flex-1 text-left px-3 py-2 text-sm"
+                            onClick={() => handleSelectAddress(suggestion)}
+                          >
+                            <div className="font-medium text-on-surface">{suggestion.display_name}</div>
+                            <div className="text-xs text-on-surface-variant mt-0.5">{suggestion.address}</div>
+                          </button>
+                          {suggestion.gmap_url && (
+                            <a
+                              href={suggestion.gmap_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-shrink-0 pr-3 text-primary hover:text-primary/70 transition-colors"
+                              title="Xem trên Google Maps"
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <ExternalLink size={14} />
+                            </a>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}

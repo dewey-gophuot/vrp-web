@@ -148,6 +148,7 @@ export interface GeocodeAutocompleteResult {
   address: string;
   lat: number;
   lng: number;
+  gmap_url: string | null;
 }
 
 export interface GeocodePlaceDetail {
@@ -156,6 +157,7 @@ export interface GeocodePlaceDetail {
   address: string;
   lat: number;
   lng: number;
+  gmap_url: string | null;
 }
 
 export interface GeocodeForwardResult {
