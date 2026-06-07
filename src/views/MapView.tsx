@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Search, Bell, Settings, Info, RefreshCw, Truck, Zap, GripVertical, CheckCircle2, X, Trash2, ChevronDown, AlertCircle, Clock, FileDown, Loader2 } from 'lucide-react';
 import api from '../api';
 import ProviderMap from '../components/ProviderMap';
-import { mapProvider, type MapMarker } from '../api/mapProvider';
+import { mapProvider, type MapMarker, type MapRoute } from '../api/mapProvider';
 
 export default function MapView() {
   const [routes, setRoutes] = useState<any[]>([]);
@@ -31,6 +31,13 @@ export default function MapView() {
   // Status update
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
 
+  // Map feature state
+  const [depot, setDepot] = useState<{ lat: number; lng: number; label?: string } | null>(null);
+  const [hiddenRoutes, setHiddenRoutes] = useState<Set<string>>(new Set());
+  const [useRoads, setUseRoads] = useState(true);
+  const [useCluster, setUseCluster] = useState(false);
+  const [roadGeometry, setRoadGeometry] = useState<Record<string, { lat: number; lng: number }[]>>({});
+
   const loadRoutes = async () => {
     setIsLoading(true);
     try {
@@ -38,23 +45,36 @@ export default function MapView() {
       if (!res || res.length === 0) { setRoutes([]); return; }
 
       const manifests = await Promise.all(
-        res.map((route: any) => api.getRouteManifest(route.route_id).catch(() => null)),
+        res.map((route: any) => api.getRouteManifest(route.id).catch(() => null)),
       );
+
+      // Capture the first available depot for the map origin marker.
+      const depotManifest = manifests.find((m: any) => m?.depot);
+      if (depotManifest?.depot) {
+        setDepot({ lat: depotManifest.depot.lat, lng: depotManifest.depot.lng, label: depotManifest.depot.name });
+      }
 
       const mapped = res.map((route: any, index: number) => {
         const manifest = manifests[index];
-        const stops = (manifest?.stops || []).map((stop: any) => ({
-          id: stop.stop_id,
-          name: stop.name || 'Stop',
-          address: stop.address || 'N/A',
-          demand: stop.status || 'pending',
-          lat: stop.lat ?? stop.coordinates?.lat,
-          lng: stop.lng ?? stop.coordinates?.lng,
-        }));
+        const stops = (manifest?.stops || [])
+          .slice()
+          .sort((a: any, b: any) => (a.sequence ?? 0) - (b.sequence ?? 0))
+          .map((stop: any) => ({
+            id: stop.stop_id,
+            name: stop.name || 'Stop',
+            address: stop.address || 'N/A',
+            demand: stop.status || 'pending',
+            sequence: stop.sequence,
+            lat: stop.lat ?? stop.coordinates?.lat,
+            lng: stop.lng ?? stop.coordinates?.lng,
+            plannedEta: stop.planned_eta,
+            timeWindowStart: stop.time_window_start,
+            timeWindowEnd: stop.time_window_end,
+          }));
 
         return {
-          id: route.route_id,
-          name: `Route ${index + 1} - ${route.route_id.substring(0, 12)}`,
+          id: route.id,
+          name: `Route ${index + 1} - ${String(route.id).substring(0, 12)}`,
           vehicle: route.vehicle_id || 'Unknown',
           status: route.status || 'pending',
           color: ['bg-primary', 'bg-warning', 'bg-success', 'bg-secondary'][index % 4],
@@ -191,17 +211,50 @@ export default function MapView() {
     }
   };
 
-  const mapMarkers: MapMarker[] = routes.flatMap(route =>
+  const formatEta = (stop: any): string => {
+    if (stop.plannedEta) {
+      const t = new Date(stop.plannedEta);
+      if (!Number.isNaN(t.getTime())) return `ETA ${t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    if (stop.timeWindowStart && stop.timeWindowEnd) return `Window ${stop.timeWindowStart}–${stop.timeWindowEnd}`;
+    return '';
+  };
+
+  const visibleRoutes = routes.filter(route => !hiddenRoutes.has(route.id));
+
+  // Ordered geo points for a route: depot → stops (by sequence) → depot.
+  const routePath = (route: any): { lat: number; lng: number }[] => {
+    const stopPts = route.stops
+      .filter((s: any) => Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lng)))
+      .map((s: any) => ({ lat: Number(s.lat), lng: Number(s.lng) }));
+    return depot ? [depot, ...stopPts, depot] : stopPts;
+  };
+
+  const mapMarkers: MapMarker[] = visibleRoutes.flatMap(route =>
     route.stops
       .filter((stop: any) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng)))
       .map((stop: any) => ({
-        id: `${route.id}-${stop.id}`,
+        id: `${route.id}::${stop.id}`,
+        groupId: route.id,
         lat: Number(stop.lat),
         lng: Number(stop.lng),
         label: stop.name,
+        order: stop.sequence != null ? stop.sequence + 1 : undefined,
+        description: [stop.address, formatEta(stop)].filter(Boolean).join(' · '),
         color: route.color,
+        draggable: true,
       })),
   );
+
+  const mapRoutes: MapRoute[] = visibleRoutes
+    .map(route => ({
+      id: route.id,
+      color: route.color,
+      label: route.name,
+      points: routePath(route),
+      geometry: useRoads ? roadGeometry[route.id] : undefined,
+    }))
+    .filter(r => r.points.length >= 2);
 
   const mapCenter = mapMarkers.length > 0
     ? {
@@ -209,6 +262,81 @@ export default function MapView() {
         lng: mapMarkers.reduce((sum, marker) => sum + marker.lng, 0) / mapMarkers.length,
       }
     : mapProvider.defaultCenter;
+
+  // Fetch road-following geometry for each route when enabled.
+  useEffect(() => {
+    if (!useRoads || routes.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        routes.map(async (route) => {
+          if (roadGeometry[route.id]) return null; // already cached
+          const path = routePath(route);
+          if (path.length < 2) return null;
+          try {
+            const res = await api.getDirections(path);
+            return [route.id, res.geometry.map(([lat, lng]) => ({ lat, lng }))] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      if (cancelled) return;
+      const fresh = entries.filter(Boolean) as (readonly [string, { lat: number; lng: number }[]])[];
+      if (fresh.length) setRoadGeometry(prev => ({ ...prev, ...Object.fromEntries(fresh) }));
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routes, useRoads, depot]);
+
+  const toggleRoute = (routeId: string) => {
+    setHiddenRoutes(prev => {
+      const next = new Set(prev);
+      next.has(routeId) ? next.delete(routeId) : next.add(routeId);
+      return next;
+    });
+  };
+
+  // Drag a stop marker near another route to reassign it to that route.
+  const handleMarkerDragEnd = async (markerId: string, pos: { lat: number; lng: number }) => {
+    const [sourceRouteId, stopId] = markerId.split('::');
+    let best: { routeId: string; dist: number } | null = null;
+    for (const route of routes) {
+      if (route.id === sourceRouteId) continue;
+      for (const s of route.stops) {
+        if (!Number.isFinite(Number(s.lat)) || !Number.isFinite(Number(s.lng))) continue;
+        const d = (Number(s.lat) - pos.lat) ** 2 + (Number(s.lng) - pos.lng) ** 2;
+        if (!best || d < best.dist) best = { routeId: route.id, dist: d };
+      }
+    }
+    if (!best) return;
+    // Optimistically move the stop in local state.
+    setRoutes(prev => {
+      const source = prev.find(r => r.id === sourceRouteId);
+      const stop = source?.stops.find((s: any) => s.id === stopId);
+      if (!stop) return prev;
+      return prev.map(r => {
+        if (r.id === sourceRouteId) return { ...r, stops: r.stops.filter((s: any) => s.id !== stopId) };
+        if (r.id === best!.routeId) return { ...r, stops: [...r.stops, stop] };
+        return r;
+      });
+    });
+    // Invalidate cached geometry for both routes so it re-fetches.
+    setRoadGeometry(prev => {
+      const next = { ...prev };
+      delete next[sourceRouteId];
+      delete next[best!.routeId];
+      return next;
+    });
+    try {
+      await api.adjustRoute(best.routeId, {
+        stop_id: stopId,
+        source_route_id: sourceRouteId,
+        target_route_id: best.routeId,
+        new_sequence_index: 0,
+      });
+    } catch (err) { console.error(err); }
+  };
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-background">
@@ -242,15 +370,48 @@ export default function MapView() {
 
       <main className="flex flex-1 overflow-hidden relative">
         <div className="flex-1 relative bg-surface-container-high overflow-hidden">
-          <ProviderMap className="absolute inset-0 h-full w-full" center={mapCenter} markers={mapMarkers} />
+          <ProviderMap
+            className="absolute inset-0 h-full w-full"
+            center={mapCenter}
+            markers={mapMarkers}
+            routes={mapRoutes}
+            depot={depot}
+            cluster={useCluster}
+            onMarkerDragEnd={handleMarkerDragEnd}
+          />
 
-          <div className="absolute top-8 right-8 z-10 flex flex-wrap gap-3 max-w-sm justify-end">
-            {routes.slice(0, 4).map((r, i) => (
-              <div key={r.id} className="flex items-center gap-3 px-5 py-3 rounded-full bg-surface-container-lowest ghost-shadow border border-primary/5">
-                <span className={`w-3.5 h-3.5 rounded-full ${r.color}`}></span>
-                <span className="text-sm font-bold text-on-surface truncate max-w-[120px]">{r.name.split(' - ')[0]}: {r.id.substring(0, 8)}</span>
-              </div>
-            ))}
+          {/* Map controls: road-following & clustering toggles */}
+          <div className="absolute top-8 left-1/2 -translate-x-1/2 z-10 flex gap-2">
+            <button
+              onClick={() => setUseRoads(v => !v)}
+              className={`px-4 py-2 rounded-full text-xs font-bold shadow-sm border transition-colors ${useRoads ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/30'}`}
+            >
+              {useRoads ? 'Roads: ON' : 'Roads: OFF'}
+            </button>
+            <button
+              onClick={() => setUseCluster(v => !v)}
+              className={`px-4 py-2 rounded-full text-xs font-bold shadow-sm border transition-colors ${useCluster ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/30'}`}
+            >
+              {useCluster ? 'Cluster: ON' : 'Cluster: OFF'}
+            </button>
+          </div>
+
+          {/* Legend: click a route to toggle its visibility */}
+          <div className="absolute top-8 right-8 z-10 flex flex-col gap-2 max-w-xs items-end">
+            {routes.slice(0, 6).map((r) => {
+              const hidden = hiddenRoutes.has(r.id);
+              return (
+                <button
+                  key={r.id}
+                  onClick={() => toggleRoute(r.id)}
+                  title={hidden ? 'Show route' : 'Hide route'}
+                  className={`flex items-center gap-3 px-4 py-2 rounded-full ghost-shadow border transition-all ${hidden ? 'bg-surface-container/60 border-transparent opacity-50' : 'bg-surface-container-lowest border-primary/5'}`}
+                >
+                  <span className={`w-3.5 h-3.5 rounded-full ${r.color}`}></span>
+                  <span className="text-xs font-bold text-on-surface truncate max-w-[140px]">{r.name.split(' - ')[0]}: {r.id.substring(0, 8)}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 

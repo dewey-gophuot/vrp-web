@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ProjectProvider } from './contexts/ProjectContext';
 import Sidebar from './components/Sidebar';
-import DashboardView from './views/Dashboard';
+import ProjectsView from './views/ProjectsView';
 import InputView from './views/InputView';
 import MapView from './views/MapView';
 import ReportsView from './views/ReportsView';
@@ -49,7 +50,7 @@ function PublicRoute() {
     );
   }
 
-  return !isAuthenticated ? <Outlet /> : <Navigate to="/dashboard" replace />;
+  return !isAuthenticated ? <Outlet /> : <Navigate to="/projects" replace />;
 }
 
 // Layout with sidebar for authenticated users
@@ -92,9 +93,10 @@ function AppContent() {
       {/* Protected Routes */}
       <Route element={<ProtectedRoute />}>
         <Route element={<AuthenticatedLayout isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />}>
-          {/* UI chính (giữ nguyên) */}
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<DashboardView />} />
+          {/* UI chính */}
+          <Route path="/" element={<Navigate to="/projects" replace />} />
+          <Route path="/projects" element={<ProjectsView />} />
+          <Route path="/dashboard" element={<Navigate to="/projects" replace />} />
           <Route path="/input" element={<InputView />} />
           <Route path="/map" element={<MapView />} />
           <Route path="/reports" element={<ReportsView />} />
@@ -122,7 +124,7 @@ function AppContent() {
       </Route>
 
       {/* Fallback */}
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/projects" replace />} />
     </Routes>
   );
 }
@@ -130,7 +132,9 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <ProjectProvider>
+        <AppContent />
+      </ProjectProvider>
     </AuthProvider>
   );
 }

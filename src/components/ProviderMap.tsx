@@ -1,137 +1,205 @@
-import React, { useMemo, useState } from 'react';
-import { AlertCircle, Locate, Minus, Plus } from 'lucide-react';
-import { isMapProviderConfigured, mapProvider, type LatLng, type MapMarker } from '../api/mapProvider';
+import React, { useEffect, useRef } from 'react';
+import { AlertCircle } from 'lucide-react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import 'leaflet.markercluster';
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
+import {
+  activeMapProvider,
+  isMapProviderConfigured,
+  paletteColor,
+  resolveColor,
+  type DepotMarker,
+  type LatLng,
+  type MapMarker,
+  type MapRoute,
+} from '../api/mapProvider';
 
 type ProviderMapProps = {
   center?: LatLng;
   zoom?: number;
   markers?: MapMarker[];
+  /** Optional polylines (delivery routes) drawn over the map. */
+  routes?: MapRoute[];
+  /** Depot / origin shown with a distinct home icon. */
+  depot?: DepotMarker | null;
+  /** Group nearby markers into clusters (good for 100+ points). */
+  cluster?: boolean;
+  /** Auto fit the viewport to all content. Defaults to true. */
+  fitToContent?: boolean;
   className?: string;
+  /** Called when the user clicks an empty spot on the map. */
+  onMapClick?: (p: LatLng) => void;
+  /** Called after a draggable marker is dropped. */
+  onMarkerDragEnd?: (id: string, p: LatLng) => void;
 };
 
-const TILE_SIZE = 256;
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
+function markerIcon(color: string, order?: number) {
+  const inner = order != null ? `<span class="vrp-marker__num">${order}</span>` : '';
+  return L.divIcon({
+    className: 'vrp-marker',
+    html: `<span class="vrp-marker__dot" style="background:${color}">${inner}</span>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -14],
+  });
 }
 
-function lngToTileX(lng: number, zoom: number) {
-  return ((lng + 180) / 360) * Math.pow(2, zoom);
+function depotIcon() {
+  return L.divIcon({
+    className: 'vrp-depot',
+    html: `<span class="vrp-depot__pin">🏠</span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+    popupAnchor: [0, -18],
+  });
 }
 
-function latToTileY(lat: number, zoom: number) {
-  const rad = (lat * Math.PI) / 180;
-  return ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * Math.pow(2, zoom);
-}
+export default function ProviderMap({
+  center = activeMapProvider.defaultCenter,
+  zoom = activeMapProvider.defaultZoom,
+  markers = [],
+  routes = [],
+  depot = null,
+  cluster = false,
+  fitToContent = true,
+  className = '',
+  onMapClick,
+  onMarkerDragEnd,
+}: ProviderMapProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const overlayRef = useRef<L.LayerGroup | null>(null);
+  const clusterRef = useRef<L.MarkerClusterGroup | null>(null);
+  // Keep latest callbacks without re-initialising the map.
+  const onMapClickRef = useRef(onMapClick);
+  const onMarkerDragEndRef = useRef(onMarkerDragEnd);
+  onMapClickRef.current = onMapClick;
+  onMarkerDragEndRef.current = onMarkerDragEnd;
 
-function tileToLng(x: number, zoom: number) {
-  return (x / Math.pow(2, zoom)) * 360 - 180;
-}
+  // Initialise the Leaflet map once.
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
 
-function tileToLat(y: number, zoom: number) {
-  const n = Math.PI - (2 * Math.PI * y) / Math.pow(2, zoom);
-  return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
-}
+    const map = L.map(containerRef.current, {
+      center: [center.lat, center.lng],
+      zoom,
+      minZoom: activeMapProvider.minZoom,
+      maxZoom: activeMapProvider.maxZoom,
+    });
 
-export default function ProviderMap({ center = mapProvider.defaultCenter, zoom = mapProvider.defaultZoom, markers = [], className = '' }: ProviderMapProps) {
-  const [currentZoom, setCurrentZoom] = useState(clamp(zoom, mapProvider.minZoom, mapProvider.maxZoom));
-  const [currentCenter, setCurrentCenter] = useState(center);
+    L.tileLayer(activeMapProvider.tileUrlTemplate, {
+      attribution: activeMapProvider.attribution,
+      maxZoom: activeMapProvider.maxZoom,
+    }).addTo(map);
 
-  const tileData = useMemo(() => {
-    const centerX = lngToTileX(currentCenter.lng, currentZoom);
-    const centerY = latToTileY(currentCenter.lat, currentZoom);
-    const baseX = Math.floor(centerX) - 2;
-    const baseY = Math.floor(centerY) - 2;
-    const offsetX = (centerX - Math.floor(centerX)) * TILE_SIZE;
-    const offsetY = (centerY - Math.floor(centerY)) * TILE_SIZE;
-    const tiles = [];
+    L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
 
-    for (let row = 0; row < 5; row += 1) {
-      for (let col = 0; col < 5; col += 1) {
-        const x = baseX + col;
-        const y = baseY + row;
-        tiles.push({ x, y, col, row, url: mapProvider.getTileUrl(x, y, currentZoom) });
-      }
+    overlayRef.current = L.layerGroup().addTo(map);
+    map.on('click', (e: L.LeafletMouseEvent) => {
+      onMapClickRef.current?.({ lat: e.latlng.lat, lng: e.latlng.lng });
+    });
+    mapRef.current = map;
+
+    requestAnimationFrame(() => map.invalidateSize());
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      overlayRef.current = null;
+      clusterRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-draw markers, routes and depot whenever the data changes.
+  useEffect(() => {
+    const map = mapRef.current;
+    const overlay = overlayRef.current;
+    if (!map || !overlay) return;
+
+    overlay.clearLayers();
+    if (clusterRef.current) {
+      map.removeLayer(clusterRef.current);
+      clusterRef.current = null;
     }
 
-    return { baseX, baseY, offsetX, offsetY, tiles };
-  }, [currentCenter, currentZoom]);
+    const bounds = L.latLngBounds([]);
 
-  const projectedMarkers = markers.map(marker => {
-    const x = (lngToTileX(marker.lng, currentZoom) - tileData.baseX) * TILE_SIZE - tileData.offsetX;
-    const y = (latToTileY(marker.lat, currentZoom) - tileData.baseY) * TILE_SIZE - tileData.offsetY;
-    return { ...marker, x, y };
-  });
+    // Routes (prefer road-following geometry, fall back to straight points).
+    routes.forEach((route, routeIdx) => {
+      const source = route.geometry && route.geometry.length >= 2 ? route.geometry : route.points;
+      const pts = source
+        .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+        .map(p => [p.lat, p.lng] as [number, number]);
+      if (pts.length < 2) return;
 
-  const handleNudge = (dx: number, dy: number) => {
-    const centerX = lngToTileX(currentCenter.lng, currentZoom) + dx;
-    const centerY = latToTileY(currentCenter.lat, currentZoom) + dy;
-    setCurrentCenter({ lat: tileToLat(centerY, currentZoom), lng: tileToLng(centerX, currentZoom) });
-  };
+      const color = resolveColor(route.color, paletteColor(routeIdx));
+      L.polyline(pts, { color, weight: 4, opacity: 0.85, lineJoin: 'round' })
+        .addTo(overlay)
+        .bindTooltip(route.label || `Route ${routeIdx + 1}`, { sticky: true });
+      pts.forEach(p => bounds.extend(p));
+    });
+
+    // Depot.
+    if (depot && Number.isFinite(depot.lat) && Number.isFinite(depot.lng)) {
+      L.marker([depot.lat, depot.lng], { icon: depotIcon(), zIndexOffset: 1000 })
+        .addTo(overlay)
+        .bindPopup(`<strong>${depot.label || 'Depot'}</strong>`)
+        .bindTooltip(depot.label || 'Depot', { direction: 'top', offset: [0, -16] });
+      bounds.extend([depot.lat, depot.lng]);
+    }
+
+    // Stop markers (optionally clustered).
+    const target: L.LayerGroup = cluster
+      ? (clusterRef.current = L.markerClusterGroup({ maxClusterRadius: 48, showCoverageOnHover: false }))
+      : overlay;
+
+    markers.forEach((marker, idx) => {
+      if (!Number.isFinite(marker.lat) || !Number.isFinite(marker.lng)) return;
+      const color = resolveColor(marker.color, paletteColor(idx));
+      const m = L.marker([marker.lat, marker.lng], {
+        icon: markerIcon(color, marker.order ?? (marker.label ? undefined : idx + 1)),
+        draggable: Boolean(marker.draggable),
+      });
+
+      const popupLines = [
+        marker.label ? `<strong>${marker.label}</strong>` : '',
+        marker.description ? `<span>${marker.description}</span>` : '',
+      ].filter(Boolean);
+      if (popupLines.length) m.bindPopup(popupLines.join('<br/>'));
+      if (marker.label) m.bindTooltip(marker.label, { direction: 'top', offset: [0, -12] });
+
+      if (marker.draggable) {
+        m.on('dragend', () => {
+          const { lat, lng } = m.getLatLng();
+          onMarkerDragEndRef.current?.(marker.id, { lat, lng });
+        });
+      }
+
+      m.addTo(target);
+      bounds.extend([marker.lat, marker.lng]);
+    });
+
+    if (cluster && clusterRef.current) map.addLayer(clusterRef.current);
+
+    if (fitToContent && bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [48, 48], maxZoom: 16 });
+    } else {
+      map.setView([center.lat, center.lng], zoom);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markers, routes, depot, cluster, center.lat, center.lng, zoom, fitToContent]);
 
   return (
-    <div className={`relative overflow-hidden bg-surface-container-high ${className}`}>
+    <div className={`relative overflow-hidden ${className}`}>
       {!isMapProviderConfigured && (
-        <div className="absolute left-1/2 top-6 z-30 -translate-x-1/2 rounded-2xl border border-warning/20 bg-warning/10 px-4 py-3 text-sm font-semibold text-on-surface shadow-lg backdrop-blur-md flex items-center gap-2">
-          <AlertCircle size={16} className="text-warning" /> Missing VITE_LOCATIONIQ_API_KEY
+        <div className="absolute left-1/2 top-6 z-[1000] -translate-x-1/2 rounded-2xl border border-warning/20 bg-warning/10 px-4 py-3 text-sm font-semibold text-on-surface shadow-lg backdrop-blur-md flex items-center gap-2">
+          <AlertCircle size={16} className="text-warning" /> Missing VITE_LOCATIONIQ_API_KEY — using OpenStreetMap
         </div>
       )}
-
-      <div className="absolute left-1/2 top-1/2 h-[1280px] w-[1280px] -translate-x-1/2 -translate-y-1/2">
-        {tileData.tiles.map(tile => (
-          <img
-            key={`${currentZoom}-${tile.x}-${tile.y}`}
-            src={tile.url}
-            alt=""
-            className="absolute select-none object-cover"
-            style={{
-              left: tile.col * TILE_SIZE - tileData.offsetX,
-              top: tile.row * TILE_SIZE - tileData.offsetY,
-              width: TILE_SIZE + 2,
-              height: TILE_SIZE + 2,
-            }}
-            draggable={false}
-          />
-        ))}
-      </div>
-
-      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-secondary/10 pointer-events-none" />
-
-      {projectedMarkers.map(marker => (
-        <div
-          key={marker.id}
-          className="absolute z-20 -translate-x-1/2 -translate-y-full flex flex-col items-center gap-1"
-          style={{ left: `calc(50% - 640px + ${marker.x}px)`, top: `calc(50% - 640px + ${marker.y}px)` }}
-        >
-          {marker.label && <span className="rounded-full bg-surface-container-lowest/95 px-2.5 py-1 text-[10px] font-bold text-on-surface shadow-md border border-outline-variant/20 whitespace-nowrap">{marker.label}</span>}
-          <span className={`h-4 w-4 rounded-full border-2 border-white shadow-lg ${marker.color || 'bg-primary'}`} />
-        </div>
-      ))}
-
-      <div className="absolute left-8 top-8 flex flex-col gap-3 z-30">
-        <div className="flex flex-col rounded-2xl glass-panel p-1.5">
-          <button type="button" onClick={() => setCurrentZoom(z => clamp(z + 1, mapProvider.minZoom, mapProvider.maxZoom))} className="p-2.5 hover:bg-surface-container rounded-xl text-on-surface transition-colors"><Plus size={20} /></button>
-          <div className="h-px bg-outline-variant/20 mx-3 my-1" />
-          <button type="button" onClick={() => setCurrentZoom(z => clamp(z - 1, mapProvider.minZoom, mapProvider.maxZoom))} className="p-2.5 hover:bg-surface-container rounded-xl text-on-surface transition-colors"><Minus size={20} /></button>
-        </div>
-        <button type="button" onClick={() => setCurrentCenter(center)} className="w-12 h-12 flex items-center justify-center rounded-2xl glass-panel text-on-surface hover:bg-surface-container transition-colors"><Locate size={20} /></button>
-      </div>
-
-      <div className="absolute bottom-4 left-4 z-30 rounded-full bg-surface-container-lowest/90 px-3 py-1.5 text-[10px] font-semibold text-on-surface-variant shadow-sm border border-outline-variant/20">
-        {mapProvider.attribution}
-      </div>
-
-      <div className="absolute bottom-4 right-4 z-30 grid grid-cols-3 gap-1 rounded-2xl glass-panel p-2 text-on-surface">
-        <span />
-        <button type="button" onClick={() => handleNudge(0, -0.4)} className="h-8 w-8 rounded-lg hover:bg-surface-container">↑</button>
-        <span />
-        <button type="button" onClick={() => handleNudge(-0.4, 0)} className="h-8 w-8 rounded-lg hover:bg-surface-container">←</button>
-        <button type="button" onClick={() => setCurrentCenter(center)} className="h-8 w-8 rounded-lg hover:bg-surface-container text-xs font-bold">•</button>
-        <button type="button" onClick={() => handleNudge(0.4, 0)} className="h-8 w-8 rounded-lg hover:bg-surface-container">→</button>
-        <span />
-        <button type="button" onClick={() => handleNudge(0, 0.4)} className="h-8 w-8 rounded-lg hover:bg-surface-container">↓</button>
-        <span />
-      </div>
+      <div ref={containerRef} className="absolute inset-0 h-full w-full" />
     </div>
   );
 }

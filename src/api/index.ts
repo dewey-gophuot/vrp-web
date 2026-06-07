@@ -77,8 +77,27 @@ export const api = {
   deleteFleetVehicle: (vehicleId: string) =>
     fetchApi<void>(`/api/v1/fleet/vehicles/${vehicleId}`, { method: 'DELETE' }),
 
+  // V1 Projects
+  listProjects: () => fetchApi<Types.ProjectResponse[]>('/api/v1/projects'),
+  createProject: (data: { name: string }) =>
+    fetchApi<Types.ProjectResponse>('/api/v1/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  getProject: (projectId: string) => fetchApi<Types.ProjectResponse>(`/api/v1/projects/${projectId}`),
+  updateProject: (projectId: string, data: { name: string }) =>
+    fetchApi<Types.ProjectResponse>(`/api/v1/projects/${projectId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  deleteProject: (projectId: string) =>
+    fetchApi<void>(`/api/v1/projects/${projectId}`, { method: 'DELETE' }),
+
   // V1 Locations
-  getLocationDemands: () => fetchApi<Types.LocationResponse[]>('/api/v1/locations/demand'),
+  getLocationDemands: (projectId: string) =>
+    fetchApi<Types.LocationResponse[]>(`/api/v1/locations/demand?project_id=${encodeURIComponent(projectId)}`),
   createLocation: (data: Types.LocationCreateDTO) =>
     fetchApi<Types.LocationResponse>('/api/v1/locations', {
       method: 'POST',
@@ -110,13 +129,13 @@ export const api = {
     }),
   deleteDepot: (depotId: string) =>
     fetchApi<void>(`/api/v1/locations/depots/${depotId}`, { method: 'DELETE' }),
-  uploadManifest: (file: File) => {
+  uploadManifest: (file: File, projectId: string) => {
     const formData = new FormData();
     formData.append('file', file);
-    return fetchApi<Types.UploadManifestResponse>('/api/v1/locations/upload-manifest', {
-      method: 'POST',
-      body: formData,
-    });
+    return fetchApi<Types.UploadManifestResponse>(
+      `/api/v1/locations/upload-manifest?project_id=${encodeURIComponent(projectId)}`,
+      { method: 'POST', body: formData },
+    );
   },
 
   // V1 Optimize
@@ -231,12 +250,25 @@ export const api = {
   geocodeReverse: (lat: number, lng: number) =>
     fetchApi<Types.GeocodeReverseResult>(`/api/v1/geocode/reverse?lat=${lat}&lng=${lng}`),
 
+  // V1 Directions (road-following geometry)
+  getDirections: (points: { lat: number; lng: number }[]) =>
+    fetchApi<{ geometry: [number, number][]; distance_km: number; duration_min: number }>(
+      '/api/v1/directions',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points }),
+      },
+    ),
+
   // V1 Metrics
   getMetricsDashboard: () => fetchApi<Types.MetricsResponse>('/api/v1/metrics/dashboard'),
 
   // V1 Routes
-  getRoutes: () => fetchApi<Types.RouteSummary[]>('/api/v1/routes'),
-  getOptimizationJobs: () => fetchApi<Types.OptimizationJob[]>('/api/v1/optimize/jobs'),
+  getRoutes: (projectId?: string) =>
+    fetchApi<Types.RouteSummary[]>(`/api/v1/routes${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
+  getOptimizationJobs: (projectId?: string) =>
+    fetchApi<Types.OptimizationJob[]>(`/api/v1/optimize/jobs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
   getOptimizationJob: (jobId: string) => fetchApi<Types.OptimizationJob>(`/api/v1/optimize/job/${jobId}`),
   cancelOptimizationJob: (jobId: string) => 
     fetchApi<{ success: boolean; job_id: string; status: string }>(`/api/v1/optimize/job/${jobId}/cancel`, {

@@ -52,6 +52,13 @@ export interface VehicleCreateDTO {
   driver_id?: string | null;
 }
 
+export interface ProjectResponse {
+  id: string;
+  name: string;
+  location_count: number;
+  created_at: string;
+}
+
 export interface OptimizeRunRequestDTO {
   project_id: string;
   solver_algorithm: string;
@@ -59,6 +66,7 @@ export interface OptimizeRunRequestDTO {
   locations: string[];
   objective: string;
   constraints?: Record<string, boolean>;
+  replace_existing?: boolean;
 }
 
 export interface RouteAdjustDTO {
@@ -83,6 +91,7 @@ export interface DriverStopStatusUpdateDTO {
 
 export interface LocationCreateDTO {
   id?: string;
+  project_id: string;
   name: string;
   address_string: string;
   lat: number;
@@ -294,12 +303,36 @@ export interface RouteStop {
   notes?: string;
 }
 
+export interface ManifestStop {
+  stop_id: string;
+  location_id: string;
+  name: string;
+  address: string;
+  sequence: number;
+  status: string;
+  lat?: number | null;
+  lng?: number | null;
+  demand_kg?: number | null;
+  service_time_mins?: number | null;
+  time_window_start?: string | null;
+  time_window_end?: string | null;
+  planned_eta?: string | null;
+}
+
+export interface ManifestDepot {
+  depot_id: string;
+  name: string;
+  lat: number;
+  lng: number;
+}
+
 export interface RouteManifest {
   route_id: string;
   vehicle_id: string;
   driver_name: string;
   status: string;
-  stops: RouteStop[];
+  depot?: ManifestDepot | null;
+  stops: (RouteStop | ManifestStop)[];
 }
 
 // ==================== OPTIMIZATION TYPES ====================

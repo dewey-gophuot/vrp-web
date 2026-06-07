@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, Database, Map as MapIcon, BarChart3, Sun, Moon, Shield, LogOut, User, Key } from 'lucide-react';
+import { FolderKanban, Database, Map as MapIcon, BarChart3, Sun, Moon, Shield, LogOut, User, Key } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useProject } from '../contexts/ProjectContext';
 
 interface SidebarProps {
   isDarkMode?: boolean;
@@ -12,11 +13,12 @@ export default function Sidebar({ isDarkMode, setIsDarkMode }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const currentView = location.pathname.replace('/', '') || 'dashboard';
+  const { activeProject } = useProject();
+  const currentView = location.pathname.replace('/', '') || 'projects';
   const [showChangePassword, setShowChangePassword] = useState(false);
 
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'projects', label: 'Projects', icon: FolderKanban },
     { id: 'input', label: 'Input', icon: Database },
     { id: 'map', label: 'Map', icon: MapIcon },
     { id: 'reports', label: 'Reports', icon: BarChart3 },
@@ -42,7 +44,19 @@ export default function Sidebar({ isDarkMode, setIsDarkMode }: SidebarProps) {
           Fleet Management
         </p>
       </div>
-      
+
+      {/* Project đang chọn */}
+      <div className="px-4 pb-2">
+        <button
+          onClick={() => navigate('/projects')}
+          className="w-full rounded-xl bg-surface-container px-3 py-2 text-left hover:bg-surface-container-high transition-colors"
+          title="Đổi project"
+        >
+          <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Project</p>
+          <p className="text-sm font-bold text-on-surface truncate">{activeProject ? activeProject.name : 'Chưa chọn'}</p>
+        </button>
+      </div>
+
       <nav className="flex-1 px-4 py-4 flex flex-col gap-1 overflow-y-auto">
         {navItems.map((item) => {
           const Icon = item.icon;

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ChevronRight, Share, Download, Share2, Printer, FileText, Table, Database, Copy, ExternalLink, Clock, Loader2, MapPin, ChevronDown } from 'lucide-react';
 import api from '../api';
 import ProviderMap from '../components/ProviderMap';
-import { mapProvider, type MapMarker } from '../api/mapProvider';
+import { mapProvider, type MapMarker, type MapRoute } from '../api/mapProvider';
 
 export default function ReportsView() {
   const [routeId, setRouteId] = useState('N/A');
@@ -14,6 +14,8 @@ export default function ReportsView() {
   const [isLoading, setIsLoading] = useState(false);
   const [showRouteDropdown, setShowRouteDropdown] = useState(false);
   const [isExporting, setIsExporting] = useState<string | null>(null);
+  const [depot, setDepot] = useState<{ lat: number; lng: number; label?: string } | null>(null);
+  const [roadGeometry, setRoadGeometry] = useState<{ lat: number; lng: number }[] | null>(null);
 
   // Load all routes initially
   useEffect(() => {
@@ -53,9 +55,13 @@ export default function ReportsView() {
       ]);
 
       setMetrics(metricRes);
+      // Reset road geometry; capture depot for the origin marker.
+      setRoadGeometry(null);
+      const depotInfo = (manifestRes as any)?.depot;
+      setDepot(depotInfo ? { lat: depotInfo.lat, lng: depotInfo.lng, label: depotInfo.name } : null);
       // Prefer manifest stops (objects with name/address) over raw stop IDs
       if (manifestRes?.stops && manifestRes.stops.length > 0) {
-        setStops(manifestRes.stops);
+        setStops([...manifestRes.stops].sort((a: any, b: any) => (a.sequence ?? 0) - (b.sequence ?? 0)));
       } else {
         // Fallback: wrap raw IDs as objects for display
         setStops((reportRes.stops || []).map((stop: any) => ({
@@ -91,6 +97,15 @@ export default function ReportsView() {
   });
 
   // Map data - computed before JSX
+  const fmtEta = (stop: any): string => {
+    if (stop.planned_eta) {
+      const t = new Date(stop.planned_eta);
+      if (!Number.isNaN(t.getTime())) return `ETA ${t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    if (stop.time_window_start && stop.time_window_end) return `Window ${stop.time_window_start}–${stop.time_window_end}`;
+    return '';
+  };
+
   const mapMarkers: MapMarker[] = stops
     .filter((stop: any) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng)))
     .map((stop: any, index: number) => ({
@@ -98,8 +113,24 @@ export default function ReportsView() {
       lat: Number(stop.lat),
       lng: Number(stop.lng),
       label: stop.name || `Stop ${index + 1}`,
+      order: stop.sequence != null ? stop.sequence + 1 : index + 1,
+      description: [stop.address, fmtEta(stop)].filter(Boolean).join(' · '),
       color: 'bg-primary',
     }));
+
+  const routePath = depot
+    ? [depot, ...mapMarkers.map(m => ({ lat: m.lat, lng: m.lng })), depot]
+    : mapMarkers.map(m => ({ lat: m.lat, lng: m.lng }));
+
+  const mapRoutes: MapRoute[] = routePath.length >= 2
+    ? [{
+        id: routeId,
+        color: 'bg-primary',
+        label: `Route ${routeId}`,
+        points: routePath,
+        geometry: roadGeometry ?? undefined,
+      }]
+    : [];
 
   const mapCenter = mapMarkers.length > 0
     ? {
@@ -107,6 +138,20 @@ export default function ReportsView() {
         lng: mapMarkers.reduce((sum, marker) => sum + marker.lng, 0) / mapMarkers.length,
       }
     : mapProvider.defaultCenter;
+
+  // Fetch road-following geometry for the selected route.
+  useEffect(() => {
+    if (routePath.length < 2 || roadGeometry) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.getDirections(routePath);
+        if (!cancelled) setRoadGeometry(res.geometry.map(([lat, lng]) => ({ lat, lng })));
+      } catch { /* keep straight-line fallback */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeId, stops, depot]);
 
   return (
     <div className="flex-1 overflow-y-auto p-8 lg:p-12 bg-background">
@@ -347,6 +392,8 @@ export default function ReportsView() {
               className="absolute inset-0 h-full w-full"
               center={mapCenter}
               markers={mapMarkers}
+              routes={mapRoutes}
+              depot={depot}
             />
             <div className="absolute inset-0 p-4 pointer-events-none">
               <div className="glass-panel px-4 py-2.5 rounded-xl inline-flex items-center gap-2.5 pointer-events-auto bg-surface-container-lowest/80">

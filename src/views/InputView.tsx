@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useProject } from '../contexts/ProjectContext';
 import { Truck, Upload, Plus, Edit2, Trash2, ChevronLeft, ChevronRight, Map as MapIcon, AlertTriangle, Settings2, MessageSquare, Route, X, FileSpreadsheet, MapPin, Zap, Play, Pause, Square, RefreshCw, BarChart3, Clock, Users, TrendingUp, Settings, CheckCircle, AlertCircle, Navigation, Calendar, Filter, Download, Eye, ExternalLink } from 'lucide-react';
 import api from '../api';
+import ProviderMap from '../components/ProviderMap';
+import { type MapMarker } from '../api/mapProvider';
 
 // Generate ID: 3 letters + 3 numbers (e.g. ABC-123)
 function generateId(): string {
@@ -22,6 +25,7 @@ function generateId(): string {
 
 export default function InputView() {
   const navigate = useNavigate();
+  const { activeProjectId, activeProject } = useProject();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showAddPoint, setShowAddPoint] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -77,6 +81,9 @@ export default function InputView() {
   const [depots, setDepots] = useState<any[]>([]);
   const [selectedDepotId, setSelectedDepotId] = useState<string | null>(null);
   const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
+  // "Bài toán" hiện tại = project đang chọn. Mọi lần chạy dùng cùng project_id nên kết quả
+  // mới luôn thay thế kết quả cũ của project.
+  const projectId = activeProjectId;
 
   // UI State — sync với URL ?tab=
   const tabFromUrl = searchParams.get('tab') as 'setup' | 'optimize' | 'routes' | 'tracking' | null;
@@ -105,7 +112,8 @@ export default function InputView() {
   });
 
   const loadFleetAndLocations = () => {
-    Promise.all([api.getFleetVehicles(), api.getLocationDemands()])
+    if (!activeProjectId) { setLocations([]); return; }
+    Promise.all([api.getFleetVehicles(), api.getLocationDemands(activeProjectId)])
       .then(([fleetRes, locationRes]) => {
         setFleet(fleetRes || []);
         setLocations(locationRes || []);
@@ -122,7 +130,8 @@ export default function InputView() {
   };
 
   const loadRoutes = () => {
-    Promise.all([api.getRoutes(), api.getActiveRoutes()])
+    if (!activeProjectId) { setRoutes([]); setActiveRoutes([]); return; }
+    Promise.all([api.getRoutes(activeProjectId), api.getActiveRoutes()])
       .then(([allRoutes, activeRoutes]) => {
         setRoutes(allRoutes || []);
         setActiveRoutes(activeRoutes || []);
@@ -131,7 +140,8 @@ export default function InputView() {
   };
 
   const loadOptimizationJobs = () => {
-    api.getOptimizationJobs().then(setOptimizationJobs).catch(console.error);
+    if (!activeProjectId) { setOptimizationJobs([]); return; }
+    api.getOptimizationJobs(activeProjectId).then(setOptimizationJobs).catch(console.error);
   };
 
   const pollJobStatus = (jobId: string) => {
@@ -164,11 +174,13 @@ export default function InputView() {
     loadRoutes();
     loadOptimizationJobs();
     loadDepots();
-    
+
     return () => {
       if (jobPolling) clearInterval(jobPolling);
     };
-  }, []);
+    // Tải lại khi đổi project
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId]);
 
   const activeVehicles = fleet.length;
   const totalCapacity = fleet.reduce((sum, v) => sum + (v.capacity_kg || 0), 0);
@@ -217,13 +229,34 @@ export default function InputView() {
     setAddressSuggestions([]);
   };
 
+  // Click / drag on the map to set coordinates, then reverse-geocode the address.
+  const handlePickOnMap = async (p: { lat: number; lng: number }) => {
+    setPointForm(prev => ({ ...prev, lat: p.lat.toFixed(6), lng: p.lng.toFixed(6) }));
+    setShowSuggestions(false);
+    try {
+      const res = await api.geocodeReverse(p.lat, p.lng);
+      const addr = (res as any)?.display_name || (res as any)?.address;
+      if (addr) setPointForm(prev => ({ ...prev, address: addr }));
+    } catch (error) {
+      console.error('Reverse geocode failed:', error);
+    }
+  };
+
+  const pickerLat = parseFloat(pointForm.lat);
+  const pickerLng = parseFloat(pointForm.lng);
+  const pickerMarker: MapMarker | null = Number.isFinite(pickerLat) && Number.isFinite(pickerLng)
+    ? { id: 'picker', lat: pickerLat, lng: pickerLng, label: pointForm.name || 'New point', color: 'bg-primary', draggable: true }
+    : null;
+
   const handleAddPoint = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!pointForm.name.trim()) { window.alert('Vui lòng nhập tên điểm giao.'); return; }
+    if (!activeProjectId) { window.alert('Chưa chọn project.'); return; }
     try {
       setIsSubmittingPoint(true);
       await api.createLocation({
         id: pointForm.id || undefined,
+        project_id: activeProjectId,
         name: pointForm.name,
         address_string: pointForm.address,
         lat: parseFloat(pointForm.lat) || 0,
@@ -243,6 +276,7 @@ export default function InputView() {
   };
 
   const handleOptimize = async () => {
+    if (!projectId) { setOptimizeMessage('Chưa chọn project.'); return; }
     if (selectedVehicleIds.length === 0 || locations.length === 0) {
       setOptimizeMessage('Cần có ít nhất 1 xe và 1 điểm giao để tối ưu.');
       return;
@@ -253,12 +287,14 @@ export default function InputView() {
       setOptimizeMessage('Đang gửi yêu cầu tối ưu...');
 
       const runRes = await api.runOptimizer({
-        project_id: `vrp-${Date.now()}`,
+        project_id: projectId,
         solver_algorithm: optimizeSettings.solver_algorithm,
         objective: optimizeSettings.objective,
         vehicles: selectedVehicleIds,
         locations: locations.map(loc => loc.id),
         constraints: optimizeSettings.constraints,
+        // Chạy lại cùng project_id sẽ thay thế route đã quy hoạch của lần trước.
+        replace_existing: true,
       });
 
       setCurrentJob({ job_id: runRes.job_id, status: 'calculating' });
@@ -298,7 +334,8 @@ export default function InputView() {
       setOptimizeMessage('Đã điều phối lộ trình cho tài xế.');
     } catch (error) {
       console.error(error);
-      setOptimizeMessage('Điều phối thất bại.');
+      // Hiện đúng lý do từ backend (vd: xe đang chạy chuyến khác / phải xong chuyến trước).
+      setOptimizeMessage(error instanceof Error ? error.message : 'Điều phối thất bại.');
     }
   };
 
@@ -350,10 +387,11 @@ export default function InputView() {
       window.alert('Vui lòng chọn file CSV/XLSX trước khi upload.');
       return;
     }
+    if (!activeProjectId) { window.alert('Chưa chọn project.'); return; }
 
     try {
       setIsUploading(true);
-      const res = await api.uploadManifest(manifestFile);
+      const res = await api.uploadManifest(manifestFile, activeProjectId);
       loadFleetAndLocations();
       setShowUpload(false);
       setManifestFile(null);
@@ -364,6 +402,25 @@ export default function InputView() {
     } finally {
       setIsUploading(false);
     }
+  };
+
+  // Mở modal sửa cho một điểm giao (tái dùng ở tab Setup và bước 1 của Optimize).
+  const startEditPoint = (loc: any) => {
+    setEditingLoc(loc);
+    setPointForm({
+      id: loc.id || '',
+      name: loc.name || '',
+      address: loc.address_string || loc.address || '',
+      lat: (loc.coordinates?.lat ?? loc.lat)?.toString() || '',
+      lng: (loc.coordinates?.lng ?? loc.lng)?.toString() || '',
+      demand: loc.demand_kg?.toString() || loc.demand?.toString() || '',
+      service_time: loc.service_time_mins?.toString() || '15',
+      time_window_start: loc.time_window_start || '',
+      time_window_end: loc.time_window_end || '',
+      priority: loc.priority?.toString() || '1',
+      phone: loc.phone || '',
+    });
+    setShowAddPoint(true);
   };
 
   const handleDeleteLocation = async () => {
@@ -715,8 +772,22 @@ export default function InputView() {
                 {/* ── BƯỚC 1: Điểm giao hàng ── */}
                 {optimizeStep === 1 && (
                   <div className="max-w-2xl mx-auto">
-                    <h2 className="text-2xl font-bold font-headline text-on-surface mb-2">Điểm giao hàng</h2>
-                    <p className="text-on-surface-variant text-sm mb-6">Kiểm tra danh sách điểm giao trước khi tối ưu.</p>
+                    <div className="flex items-start justify-between mb-6">
+                      <div>
+                        <h2 className="text-2xl font-bold font-headline text-on-surface mb-2">Điểm giao hàng</h2>
+                        <p className="text-on-surface-variant text-sm">Sửa trực tiếp danh sách điểm giao trước khi tối ưu.</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEditingLoc(null);
+                          setPointForm({ id: '', name: '', address: '', lat: '', lng: '', demand: '', service_time: '15', time_window_start: '', time_window_end: '', priority: '1', phone: '' });
+                          setShowAddPoint(true);
+                        }}
+                        className="h-10 px-4 rounded-xl bg-primary-fixed text-on-primary-fixed font-bold text-sm flex items-center gap-2 hover:bg-primary-fixed-dim transition-colors shrink-0"
+                      >
+                        <Plus size={16} /> Thêm điểm
+                      </button>
+                    </div>
                     <div className="grid grid-cols-2 gap-4 mb-6">
                       <div className="rounded-xl bg-surface-container-low border border-outline-variant/10 p-5 flex flex-col gap-1">
                         <span className="text-xs font-bold text-on-surface-variant uppercase tracking-widest">Số điểm giao</span>
@@ -730,7 +801,7 @@ export default function InputView() {
                     {locations.length === 0 && (
                       <div className="mb-6 p-4 rounded-xl bg-error/10 border border-error/20 flex items-center gap-3 text-error text-sm font-medium">
                         <AlertTriangle size={18} className="shrink-0" />
-                        Chưa có điểm giao nào. Vui lòng thêm điểm ở tab Setup.
+                        Chưa có điểm giao nào. Bấm "Thêm điểm" để bắt đầu.
                       </div>
                     )}
                     <div className="rounded-xl bg-surface-container-lowest border border-outline-variant/10 overflow-hidden mb-6">
@@ -740,16 +811,27 @@ export default function InputView() {
                             <th className="px-4 py-3 text-xs font-bold text-outline uppercase tracking-wider">Tên</th>
                             <th className="px-4 py-3 text-xs font-bold text-outline uppercase tracking-wider">Địa chỉ</th>
                             <th className="px-4 py-3 text-xs font-bold text-outline uppercase tracking-wider">Demand (kg)</th>
+                            <th className="px-4 py-3 text-xs font-bold text-outline uppercase tracking-wider text-right">Thao tác</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-outline-variant/10">
                           {locations.length === 0 ? (
-                            <tr><td colSpan={3} className="px-4 py-3 text-sm text-on-surface-variant text-center">Không có dữ liệu</td></tr>
+                            <tr><td colSpan={4} className="px-4 py-3 text-sm text-on-surface-variant text-center">Không có dữ liệu</td></tr>
                           ) : locations.map((loc, idx) => (
-                            <tr key={loc.id || idx} className="hover:bg-surface-container-low/50">
+                            <tr key={loc.id || idx} className="hover:bg-surface-container-low/50 group">
                               <td className="px-4 py-3 text-sm font-semibold text-on-surface">{loc.name}</td>
                               <td className="px-4 py-3 text-xs text-on-surface-variant max-w-xs truncate">{loc.address_string || loc.address || '—'}</td>
                               <td className="px-4 py-3 text-sm font-mono">{loc.demand_kg || 0}</td>
+                              <td className="px-4 py-3 text-right">
+                                <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button onClick={() => startEditPoint(loc)} className="p-1.5 text-outline hover:text-primary bg-surface-container-low rounded-lg hover:bg-primary/10 transition-colors">
+                                    <Edit2 size={13} />
+                                  </button>
+                                  <button onClick={() => setDeletingLocId(loc.id)} className="p-1.5 text-outline hover:text-error bg-surface-container-low rounded-lg hover:bg-error/10 transition-colors">
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -1055,7 +1137,7 @@ export default function InputView() {
                     {/* Summary cards */}
                     <div className="grid grid-cols-4 gap-4 mb-6">
                       {[
-                        { label: 'Lộ trình', value: currentJob.result?.routes?.length ?? 0, unit: '' },
+                        { label: 'Số chuyến', value: currentJob.result?.routes?.length ?? 0, unit: '' },
                         { label: 'Tổng km', value: currentJob.result?.total_distance_km ?? 0, unit: 'km' },
                         { label: 'Thời gian', value: Math.round(currentJob.result?.total_duration_mins ?? 0), unit: 'phút' },
                         { label: 'Chi phí', value: currentJob.result?.total_cost ?? 0, unit: '$' },
@@ -1067,6 +1149,17 @@ export default function InputView() {
                       ))}
                     </div>
 
+                    {/* Cảnh báo điểm không thể giao (demand lớn hơn mọi xe) */}
+                    {currentJob.result?.unassigned_count > 0 && (
+                      <div className="mb-6 p-4 rounded-xl bg-error/10 border border-error/20 flex items-start gap-3 text-error text-sm">
+                        <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-semibold">{currentJob.result.unassigned_count} điểm chưa được giao</p>
+                          <p className="text-error/80 mt-0.5">Các điểm này có khối lượng lớn hơn tải trọng của mọi xe nên không xe nào chở được. Hãy tăng tải trọng xe hoặc tách nhỏ đơn hàng.</p>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Routes table */}
                     {currentJob.result?.routes && currentJob.result.routes.length > 0 && (
                       <div className="rounded-xl bg-surface-container-lowest border border-outline-variant/10 overflow-hidden mb-6">
@@ -1075,6 +1168,7 @@ export default function InputView() {
                             <tr>
                               <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Lộ trình</th>
                               <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Xe</th>
+                              <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Chuyến</th>
                               <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Stops</th>
                               <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Km</th>
                               <th className="px-4 py-3 text-xs font-bold text-outline uppercase">Tải (kg)</th>
@@ -1082,33 +1176,59 @@ export default function InputView() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-outline-variant/10">
-                            {currentJob.result.routes.map((r: any, idx: number) => (
-                              <tr key={r.route_id || idx} className="hover:bg-surface-container-low/50">
-                                <td className="px-4 py-3 font-mono text-xs text-primary">{r.route_id || `Route ${idx + 1}`}</td>
-                                <td className="px-4 py-3 text-sm font-medium">{r.vehicle_id}</td>
-                                <td className="px-4 py-3 text-sm">{r.stop_count}</td>
-                                <td className="px-4 py-3 text-sm font-mono">{r.distance_km ?? r.total_distance_km ?? 0}</td>
-                                <td className="px-4 py-3 text-sm font-mono">{r.load_kg}</td>
-                                <td className="px-4 py-3">
-                                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${(r.utilization_pct || 0) > 90 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-                                    {r.utilization_pct || 0}%
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
+                            {(() => {
+                              const tripTotals: Record<string, number> = {};
+                              currentJob.result.routes.forEach((r: any) => { tripTotals[r.vehicle_id] = (tripTotals[r.vehicle_id] || 0) + 1; });
+                              const seen: Record<string, number> = {};
+                              return currentJob.result.routes.map((r: any, idx: number) => {
+                                seen[r.vehicle_id] = (seen[r.vehicle_id] || 0) + 1;
+                                const total = tripTotals[r.vehicle_id];
+                                return (
+                                  <tr key={r.route_id || idx} className="hover:bg-surface-container-low/50">
+                                    <td className="px-4 py-3 font-mono text-xs text-primary">{r.route_id || `Route ${idx + 1}`}</td>
+                                    <td className="px-4 py-3 text-sm font-medium">{r.vehicle_id}</td>
+                                    <td className="px-4 py-3 text-sm">
+                                      {total > 1 ? (
+                                        <span className="text-xs font-bold px-2 py-1 rounded-full bg-primary/10 text-primary">Chuyến {seen[r.vehicle_id]}/{total}</span>
+                                      ) : (
+                                        <span className="text-xs text-on-surface-variant">1 chuyến</span>
+                                      )}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm">{r.stop_count}</td>
+                                    <td className="px-4 py-3 text-sm font-mono">{r.distance_km ?? r.total_distance_km ?? 0}</td>
+                                    <td className="px-4 py-3 text-sm font-mono">{r.load_kg}</td>
+                                    <td className="px-4 py-3">
+                                      <span className={`text-xs font-bold px-2 py-1 rounded-full ${(r.utilization_pct || 0) > 90 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                                        {r.utilization_pct || 0}%
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              });
+                            })()}
                           </tbody>
                         </table>
                       </div>
                     )}
 
                     {/* Actions */}
-                    <div className="flex items-center justify-between">
-                      <button
-                        onClick={() => { setOptimizeStep(1); setSelectedDepotId(null); setSelectedVehicleIds([]); setCurrentJob(null); setIsOptimizing(false); }}
-                        className="h-11 px-6 rounded-xl bg-surface-container-high font-bold text-sm flex items-center gap-2 hover:bg-surface-container-highest transition-colors"
-                      >
-                        <RefreshCw size={16} /> Tối ưu mới
-                      </button>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        {/* Sửa lại input nhưng GIỮ depot/xe/thuật toán + cùng project → chạy lại sẽ thay thế kết quả cũ */}
+                        <button
+                          onClick={() => { setCurrentJob(null); setIsOptimizing(false); goToStep(1); }}
+                          className="h-11 px-6 rounded-xl bg-secondary-container text-on-secondary-container font-bold text-sm flex items-center gap-2 hover:bg-secondary-container/80 transition-colors"
+                        >
+                          <Edit2 size={16} /> Sửa input & chạy lại
+                        </button>
+                        {/* Chạy lại từ đầu: reset lựa chọn depot/xe (cùng project → thay thế kết quả cũ) */}
+                        <button
+                          onClick={() => { setSelectedDepotId(null); setSelectedVehicleIds([]); setCurrentJob(null); setIsOptimizing(false); goToStep(1); }}
+                          className="h-11 px-6 rounded-xl bg-surface-container-high font-bold text-sm flex items-center gap-2 hover:bg-surface-container-highest transition-colors"
+                        >
+                          <RefreshCw size={16} /> Tối ưu mới
+                        </button>
+                      </div>
                       <a
                         href={`http://localhost:8501?job_id=${currentJob.job_id}&token=${encodeURIComponent(token)}`}
                         target="_blank"
@@ -1155,6 +1275,9 @@ export default function InputView() {
                         <div className="flex items-center gap-2">
                           <Truck className="text-primary" size={20} />
                           <h3 className="font-bold text-on-surface">{route.vehicle_id}</h3>
+                          {route.trip_index > 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-primary/10 text-primary">Chuyến {route.trip_index}</span>
+                          )}
                         </div>
                         <span className={`px-3 py-1 rounded-full text-xs font-bold ${
                           route.status === 'planned' ? 'bg-blue-100 text-blue-800' :
@@ -1368,12 +1491,12 @@ export default function InputView() {
       {/* Modals */}
       {showAddPoint && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-outline/20 backdrop-blur-sm p-4">
-          <div className="bg-surface-container-lowest w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-6 border-b border-outline-variant/10">
+          <div className="bg-surface-container-lowest w-full max-w-3xl max-h-[92vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center p-6 border-b border-outline-variant/10 shrink-0">
               <h3 className="text-xl font-bold text-on-surface font-headline">{editingLoc ? 'Edit Delivery Point' : 'Add Delivery Point'}</h3>
               <button onClick={() => { setShowAddPoint(false); setEditingLoc(null); setPointForm({ id: '', name: '', address: '', lat: '', lng: '', demand: '', service_time: '15', time_window_start: '', time_window_end: '', priority: '1', phone: '' }); }} className="text-outline hover:text-on-surface p-1 rounded-lg hover:bg-surface-container"><X size={20} /></button>
             </div>
-            <form className="p-6 flex flex-col gap-4" onSubmit={editingLoc ? handleEditLocation : handleAddPoint}>
+            <form className="p-6 flex flex-col gap-4 overflow-y-auto" onSubmit={editingLoc ? handleEditLocation : handleAddPoint}>
               <div><label className="text-xs font-bold text-on-surface-variant uppercase">Order ID</label>
                 <div className="flex gap-2">
                   <input 
@@ -1457,6 +1580,22 @@ export default function InputView() {
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="text-xs font-bold text-on-surface-variant uppercase">Latitude</label><input type="number" step="0.000001" placeholder="e.g. 10.7769" value={pointForm.lat || ''} onChange={e => setPointForm(prev => ({ ...prev, lat: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
                 <div><label className="text-xs font-bold text-on-surface-variant uppercase">Longitude</label><input type="number" step="0.000001" placeholder="e.g. 106.7009" value={pointForm.lng || ''} onChange={e => setPointForm(prev => ({ ...prev, lng: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant uppercase flex items-center gap-1.5">
+                  <MapPin size={12} /> Pick on map <span className="text-outline normal-case font-normal">— click or drag the marker</span>
+                </label>
+                <div className="relative mt-1 h-80 rounded-xl overflow-hidden border border-outline-variant/20">
+                  <ProviderMap
+                    className="absolute inset-0 h-full w-full"
+                    center={pickerMarker ? pickerMarker : undefined}
+                    zoom={pickerMarker ? 15 : undefined}
+                    markers={pickerMarker ? [pickerMarker] : []}
+                    fitToContent={false}
+                    onMapClick={handlePickOnMap}
+                    onMarkerDragEnd={(_id, p) => handlePickOnMap(p)}
+                  />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="text-xs font-bold text-on-surface-variant uppercase">Demand / Weight (kg)</label><input type="number" step="0.1" required value={pointForm.demand} onChange={e => setPointForm(prev => ({ ...prev, demand: e.target.value }))} className="mt-1 w-full h-10 bg-surface-container-low rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" /></div>
